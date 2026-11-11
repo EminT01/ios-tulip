@@ -1,0 +1,16 @@
+diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
+index 3d3aa3c..9542ad9 100644
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -1333,6 +1333,11 @@ arm_vm_prot_init(__unused boot_args * args)
+ 	const DTMemoryMapRange *auxKC_range, *auxKC_header_range;
+ 	unsigned int auxKC_range_size, auxKC_header_range_size;
+ 
++#if defined(VINCE_TULIP)
++	/* tulip has no auxiliary kext collection; the ADT's memory-map carries no AuxKC entries */
++	sweet_early_mark(10, "arm_vm_prot_init: no AuxKC (tulip)");
++	goto noAuxKC;
++#endif
+ 	err = SecureDTGetProperty(memory_map, "AuxKC", (const void**)&auxKC_range,
+ 	    &auxKC_range_size);
+ 	if (err != kSuccess) {
