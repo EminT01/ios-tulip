@@ -29,7 +29,7 @@ concurrency:
 env:
   DXB_REPO: https://github.com/blacktop/darwin-xnu-build
   DXB_SHA: 663906528d1cd5ea8fde7de6f16de73db9511549
-  MACOS_VERSION: ${{ inputs.macos_version || '15' }}
+  MACOS_VERSION: '13.5'
   KERNEL_CONFIG: ${{ inputs.kernel_config || 'DEVELOPMENT' }}
   MACHINE_CONFIG: ${{ inputs.machine_config || 'VINCE' }}
 
@@ -70,7 +70,9 @@ jobs:
         working-directory: dxb
         env:
           MAKEFLAGS: ${{ inputs.keep_going == 'false' && '' || '-k' }}
-        run: bash build.sh
+        run: |
+          echo "MACOS_VERSION=[$MACOS_VERSION] KERNEL_CONFIG=[$KERNEL_CONFIG] MACHINE_CONFIG=[$MACHINE_CONFIG]"
+          bash build.sh
 
       - name: Package build tree
         if: always()
