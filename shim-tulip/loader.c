@@ -1,4 +1,5 @@
 /*
+typedef void (*xnu_entry_t)(uint64_t boot_args_pa);
  * tulip iBoot-like loader for the XNU Mach-O payload (Redmi Note 6 Pro, SDM636); derived from ios-vince
  */
 #include <stdint.h>
@@ -71,6 +72,39 @@ static int magic_ok(const char *m)
 }
 
 typedef void (*xnu_entry_t)(uint64_t boot_args_pa);
+
+/* === YENI EKLENEN FONKSIYON === */
+/* ADT kopyasindaki random-seed'i tazele. 1 = bulundu ve yazildi */
+static int adt_patch_seed(uintptr_t adt, uint64_t adt_size)
+{
+    static const char key[] = "random-seed";
+    volatile uint8_t *b = (volatile uint8_t *)adt;
+
+    for (uint64_t i = 0; i + 40 <= adt_size; i++) {
+        if (b[i + 11] != 0) continue;
+        int ok = 1;
+        for (int k = 0; k < 11; k++)
+            if (b[i + k] != (uint8_t)key[k]) { ok = 0; break; }
+        if (!ok) continue;
+
+        uint32_t len = (uint32_t)b[i+32] | ((uint32_t)b[i+33] << 8)
+                     | ((uint32_t)b[i+34] << 16) | ((uint32_t)b[i+35] << 24);
+        len &= 0x7fffffffu;
+        if (len == 0 || len > 256 || i + 36 + len > adt_size) continue;
+
+        for (uint32_t k = 0; k < len; k++)
+            b[i + 36 + k] = (uint8_t)(0x5a ^ (uint8_t)(k * 31 + 7));
+
+        con_hex("SEEDOFF", i + 36);
+        con_hex("SEEDLEN", len);
+        con_hex("S0", (uintptr_t)((uint32_t)b[i+36] | ((uint32_t)b[i+37] << 8)
+                    | ((uint32_t)b[i+38] << 16) | ((uint32_t)b[i+39] << 24)));
+
+        return 1;
+    }
+    return 0;
+}
+/* === EKLENEN KOD BITTI === */
 
 const char *loader_boot(uintptr_t dtb)
 {
@@ -156,6 +190,12 @@ const char *loader_boot(uintptr_t dtb)
 		"isb\n"
 		::: "memory"
 	);
+
+        if (adt_patch_seed(adt_pa, p->adt_size))
+		con_str("SEED", "FOUND + patched");
+	else
+		con_str("SEED", "NOT FOUND in ADT");
+	__asm__ volatile("dsb sy" ::: "memory");
 
 	((xnu_entry_t)entry_pa)(ba_pa);
 	return "xnu returned";
