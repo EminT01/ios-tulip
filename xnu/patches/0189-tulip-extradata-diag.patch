@@ -1,0 +1,59 @@
+diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
+index 9542ad9..0917715 100644
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -1324,6 +1324,17 @@ arm_vm_prot_init(__unused boot_args * args)
+ 				segLOWESTRO = segEXTRADATA;
+ 			}
+ 		} else {
++#if defined(VINCE_TULIP)
++			tulip_early_hex("memmap lookup err", (uint64_t)(int64_t)err);
++			tulip_early_hex("segEXTRADATA", segEXTRADATA);
++			tulip_early_hex("segSizeEXTRADATA", segSizeEXTRADATA);
++			tulip_early_hex("segLOWEST", segLOWEST);
++			tulip_early_hex("DT head", (uint64_t)PE_state.deviceTreeHead);
++			tulip_early_hex("DT size", (uint64_t)PE_state.deviceTreeSize);
++			tulip_early_hex("DT locked", (uint64_t)SecureDTIsLockedDown());
++			tulip_early_hex("segTRUSTCACHE", segTRUSTCACHE);
++			tulip_early_hex("segSizeTRUSTCACHE", segSizeTRUSTCACHE);
++#endif
+ 			panic("EXTRADATA is in an unexpected place: %#lx > %#lx", segEXTRADATA, segLOWEST);
+ 		}
+ 
+diff --git a/osfmk/arm64/sweet_early.c b/osfmk/arm64/sweet_early.c
+index 4c6937a..e4c9f74 100644
+--- a/osfmk/arm64/sweet_early.c
++++ b/osfmk/arm64/sweet_early.c
+@@ -199,6 +199,20 @@ sweet_early_mark(unsigned int stage, const char *label)
+ 	sweet_early_putc('\n');
+ }
+ 
++void
++tulip_early_hex(const char *label, uint64_t v)
++{
++	if (early_disabled) {
++		return;
++	}
++	sweet_early_string(label);
++	sweet_early_string(" ");
++	for (int sh = 60; sh >= 0; sh -= 4) {
++		sweet_early_putc("0123456789abcdef"[(v >> sh) & 0xf]);
++	}
++	sweet_early_putc('\n');
++}
++
+ void
+ sweet_early_panic(const char *fmt, va_list *args)
+ {
+diff --git a/osfmk/arm64/sweet_early.h b/osfmk/arm64/sweet_early.h
+index c8e2fc2..a7f5eb3 100644
+--- a/osfmk/arm64/sweet_early.h
++++ b/osfmk/arm64/sweet_early.h
+@@ -12,6 +12,7 @@ void sweet_early_hex(uint64_t val);
+ void sweet_early_puts(const char *s);
+ void vince_early_exception(uint64_t esr, uint64_t far, uint64_t elr);
+ void sweet_early_panic(const char *fmt, va_list *args);
++void tulip_early_hex(const char *label, uint64_t v);
+ void sweet_early_relocate(uint64_t base);
+ void sweet_early_disable(void);
+ #else
