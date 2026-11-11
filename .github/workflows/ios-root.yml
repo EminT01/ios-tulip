@@ -1,0 +1,276 @@
+name: ios-root
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y hfsprogs rsync libarchive-tools g++ cmake libfuse3-dev libbz2-dev zlib1g-dev
+          # mkfs.hfsplus / fsck.hfsplus live in /sbin; tools/mkiosroot.sh calls
+          # them without sudo, so make them visible on the normal PATH
+          sudo ln -sf /sbin/mkfs.hfsplus /usr/local/bin/mkfs.hfsplus
+          sudo ln -sf /sbin/fsck.hfsplus /usr/local/bin/fsck.hfsplus
+          mkfs.hfsplus 2>&1 | head -1 || true
+
+      - name: Build apfs-fuse from source
+        run: |
+          git clone --recursive --depth 1 https://github.com/sgan81/apfs-fuse.git
+          cd apfs-fuse
+          mkdir b && cd b
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          make -j4
+          sudo cp apfs-fuse /usr/local/bin/
+          apfs-fuse 2>&1 | head -2 || true
+
+      - name: Download IPSW
+        run: |
+          curl -sS -L --retry 3 -o ipsw.ipsw "https://updates.cdn-apple.com/2025FallFCS/fullrestores/122-77006/1158E502-D76D-4226-AA06-ED5E30CD1111/iPhone10,3,iPhone10,6_16.7.16_20H392_Restore.ipsw"
+          ls -la ipsw.ipsw
+
+      - name: Extract DMGs (bsdtar; unzip 6.0 corrupts zip64 members)
+        run: |
+          mkdir -p work/dmgs
+          bsdtar -xf ipsw.ipsw -C work/dmgs --include="*.dmg"
+          rm -f ipsw.ipsw
+          ls -laS work/dmgs/
+          df -h /
+
+      - name: Normalize images (AppOS ships IM4P-wrapped, apfs-fuse cannot read it)
+        run: |
+          python3 - <<'EOF'
+          import struct, os, glob
+
+          def find_container(path):
+              with open(path, 'rb') as f:
+                  f.seek(0, 2); size = f.tell()
+                  f.seek(max(0, size - 512)); tail = f.read(512)
+                  f.seek(0); head = f.read(1 << 20)
+              if tail[:4] == b'koly':
+                  print(path, ': UDIF (koly trailer) -> keep as-is')
+                  return None
+              start = 0
+              while True:
+                  j = head.find(b'NXSB', start)
+                  if j < 0:
+                      break
+                  x = j - 32
+                  if x >= 0:
+                      oid = struct.unpack('<Q', head[x+8:x+16])[0]
+                      bs  = struct.unpack('<I', head[x+36:x+40])[0]
+                      bc  = struct.unpack('<Q', head[x+40:x+48])[0]
+                      if oid == 1 and bs == 4096 and bc * bs == size - x:
+                          return x
+                  start = j + 1
+              return None
+
+          for path in sorted(glob.glob('work/dmgs/*.dmg')):
+              x = find_container(path)
+              if x is None:
+                  continue
+              if x == 0:
+                  print(path, ': raw APFS at offset 0 -> no slice needed')
+                  continue
+              with open(path, 'rb') as f, open(path + '.apfs', 'wb') as out:
+                  f.seek(x)
+                  while True:
+                      chunk = f.read(1 << 24)
+                      if not chunk:
+                          break
+                      out.write(chunk)
+              os.replace(path + '.apfs', path)
+              print(path, ': stripped', x, '-byte IM4P wrapper, APFS container now at offset 0')
+          EOF
+
+      - name: Build iOS root (canonical tools/mkiosroot.sh)
+        run: |
+          export PATH="/usr/local/bin:/usr/sbin:/sbin:$PATH"
+          set -x
+          # upstream ships one stray CRLF on the script's last line; bash only
+          # reaches it AFTER the image is fully built, then dies with exit 127
+          sed -i 's/\r$//' tools/mkiosroot.sh
+          OS=$(ls work/dmgs/087-86698-*.dmg | head -1)
+          SYSOS=$(ls work/dmgs/087-86593-*.dmg | head -1)
+          APPOS=$(ls work/dmgs/087-86622-*.dmg | head -1)
+          # Canonical default 16G: IPSW content is LZBITMAP-compressed and
+          # expands to ~12-13G (OS root ~9G + cryptexes ~3G); 16G still fits
+          # any vince userdata (even the 32 GB model has ~23.5G)
+          bash tools/mkiosroot.sh "$OS" "$SYSOS" "$APPOS" ios16-root.img 16G
+          ls -la ios16-root.img
+          df -h /
+
+      - name: Apply SWEET bring-up tweaks (author script; _PanicOnCrasX etc.)
+        run: |
+          sudo mkdir -p /mnt/iosroot
+          sudo mount -t hfsplus -o loop,force ios16-root.img /mnt/iosroot
+          sudo python3 tools/sweet-root-tweaks.py /mnt/iosroot
+          sync
+
+      - name: Remove the fsck boot task from launchd (deadlocks on the live root)
+        run: |
+          sudo python3 - <<'EOF'
+          import plistlib, struct, os
+
+          root = '/mnt/iosroot'
+          path = root + '/System/Library/xpc/launchd.plist'
+          st = os.stat(path)
+          data = open(path, 'rb').read()
+          pl = plistlib.loads(data)
+          removed, kept_fsck_like = [], []
+          for key in list(pl.keys()):
+              jobs = pl[key]
+              if not isinstance(jobs, dict):
+                  continue
+              for l in list(jobs.keys()):
+                  job = jobs[l]
+                  if not isinstance(job, dict):
+                      continue
+                  prog = job.get('ProgramArguments') or []
+                  text = ' '.join(str(a) for a in prog) + ' ' + str(job.get('Program') or '')
+                  if 'fsck' in l.lower() or 'fsck' in text.lower():
+                      removed.append((key, l, text))
+                      del jobs[l]
+          new = plistlib.dumps(pl, fmt=plistlib.FMT_BINARY)
+          with open(path, 'wb') as f:
+              f.write(new)
+          os.chown(path, st.st_uid, st.st_gid)
+          os.chmod(path, st.st_mode & 0o7777)
+          print('REMOVED JOBS:', removed)
+          print('plist size: %d -> %d' % (len(data), len(new)))
+
+          # locate the new file's blocks inside the image and extract them
+          sig = new[:4096]
+          img = open('/home/runner/work/ios-vince/ios-vince/ios16-root.img', 'rb')
+          BLOCK = 4096
+          imgsize = os.path.getsize('/home/runner/work/ios-vince/ios-vince/ios16-root.img')
+          pos = 0
+          hit = -1
+          while pos < imgsize:
+              buf = img.read(64 * 1024 * 1024)
+              if not buf:
+                  break
+              i = buf.find(sig)
+              if i >= 0:
+                  hit = pos + i
+                  break
+              pos += len(buf) - len(sig) + 1
+              img.seek(pos)
+          print('plist found in image at byte 0x%X' % hit)
+          assert hit >= 0 and hit % BLOCK == 0, 'plist not block-aligned!'
+          nblocks = (len(new) + BLOCK - 1) // BLOCK
+          img.seek(hit)
+          blob = img.read(nblocks * BLOCK)
+          open('/home/runner/plistblocks.bin', 'wb').write(blob)
+          open('/home/runner/plistblocks.manifest', 'w').write('%d %d\n' % (hit, nblocks * BLOCK))
+          print('plist blocks: offset %d, %d blocks, %d bytes' % (hit, nblocks, len(blob)))
+          EOF
+          sudo umount /mnt/iosroot
+          sync
+
+      - name: Copy /sbin/mount over /sbin/fsck (exits instantly on bad args)
+        run: |
+          sudo mkdir -p /mnt/iosroot
+          sudo mount -t hfsplus -o loop,force ios16-root.img /mnt/iosroot
+          ls -la /mnt/iosroot/sbin/mount || echo "WARNING: no mount"
+          for f in fsck fsck_apfs; do
+            if [ -e "/mnt/iosroot/sbin/$f" ]; then
+              sudo cp -f /mnt/iosroot/sbin/mount "/mnt/iosroot/sbin/$f"
+              sudo chown 0:0 "/mnt/iosroot/sbin/$f"
+              sudo chmod 755 "/mnt/iosroot/sbin/$f"
+              echo "stubbed /sbin/$f with mount binary"
+            fi
+          done
+          sudo umount /mnt/iosroot
+          sync
+          python3 - <<'EOF'
+          import struct, os
+
+          BLOCK = 4096
+          total_blocks = 4194304
+          SPARSE_MAGIC = 0xED26FF3A
+          MAX_RUN = 32766
+
+          def find_block(key):
+              img = open('ios16-root.img', 'rb')
+              size = os.path.getsize('ios16-root.img')
+              pos = 0
+              while pos < size:
+                  buf = img.read(64 * 1024 * 1024)
+                  if not buf: break
+                  i = buf.find(key)
+                  if i >= 0:
+                      hit = pos + i
+                      assert hit % BLOCK == 0, 'not aligned: 0x%X' % hit
+                      return hit // BLOCK
+                  pos += len(buf) - len(key) + 1
+                  img.seek(pos)
+              return -1
+
+          def dc_bytes(n):
+              o = b''; k = 0
+              while n > 0:
+                  take = min(n, MAX_RUN)
+                  o += struct.pack('<HHII', 0xCAC3, 0, take, 12); n -= take; k += 1
+              return o, k
+
+          # capture sed's first block as the search key (it was copied over fsck)
+          # we need to find where the COPY landed, which is the same as where the
+          # ORIGINAL fsck was. Search for sed's unique first bytes at the fsck position.
+          # Actually: after cp, the fsck position contains sed's data. Search for that.
+          sed_data = open('/mnt/iosroot-backup/sed_first_block', 'rb').read() if os.path.exists('/mnt/iosroot-backup/sed_first_block') else None
+          # Simpler: we know the ORIGINAL fsck block positions from previous runs
+          # Use the known positions
+          blocks = [2094525, 3057129]
+          img = open('ios16-root.img', 'rb')
+          img.seek(blocks[0] * BLOCK)
+          current = img.read(BLOCK)
+          img.close()
+
+          def dc_bytes2(n):
+              o = b''; k = 0
+              while n > 0:
+                  take = min(n, MAX_RUN)
+                  o += struct.pack('<HHII', 0xCAC3, 0, take, 12); n -= take; k += 1
+              return o, k
+
+          body = b''; nchunks = 0; prev = 0
+          for blk in blocks:
+              dcb, k = dc_bytes2(blk - prev); body += dcb; nchunks += k
+              img = open('ios16-root.img', 'rb')
+              img.seek(blk * BLOCK)
+              data = img.read(BLOCK)
+              img.close()
+              body += struct.pack('<HHII', 0xCAC1, 0, 1, 12 + BLOCK) + data
+              nchunks += 1; prev = blk + 1
+          dcb, k = dc_bytes(total_blocks - prev); body += dcb; nchunks += k
+          hdr2 = struct.pack('<IHHHHIIII', SPARSE_MAGIC, 1, 0, 28, 12, BLOCK, total_blocks, nchunks, 0)
+          open('/home/runner/fsck-sed.sparse', 'wb').write(hdr2 + body)
+          print('patch sparse: %d bytes' % os.path.getsize('/home/runner/fsck-sed.sparse'))
+          with open('/home/runner/fsck-sed.manifest', 'w') as f:
+              f.write(' '.join(str(b) for b in blocks))
+          EOF
+
+      - name: Upload fsck sed patch artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fsck-sed-patch
+          path: |
+            /home/runner/fsck-sed.sparse
+            /home/runner/fsck-sed.manifest
+          retention-days: 7
+
+      - name: Upload plist blocks artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plistblocks
+          path: |
+            /home/runner/plistblocks.bin
+            /home/runner/plistblocks.manifest
+          retention-days: 7

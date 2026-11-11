@@ -1,0 +1,489 @@
+diff --git a/bsd/dev/vince_mmc.c b/bsd/dev/vince_mmc.c
+index 8df3fb7..e0f22ff 100644
+--- a/bsd/dev/vince_mmc.c
++++ b/bsd/dev/vince_mmc.c
+@@ -852,6 +852,17 @@ vince_mmc_init(void)
+ 	char want[64] = "userdata";
+ 	int error;
+ 
++#if defined(VINCE_TULIP)
++	/*
++	 * SDM636 has a Qualcomm SDHCI v5 host at 0x0c0c4000 (core 0x0c0c5000), not the MSM8953 MCI core this driver
++	 * programs. Until the tulip driver exists, touching SDCC1_PHYS (0x07824000) could hang the bus, so refuse.
++	 */
++	const int tulip_mmc_off = 1;
++	if (tulip_mmc_off) {
++		printf("TULIP MMC: eMMC root driver is not ported yet\n");
++		return ENODEV;
++	}
++#endif
+ 	PE_parse_boot_argn("mmcroot", want, sizeof(want));
+ 	vm.base = ml_io_map(SDCC1_PHYS, 0x1000);
+ 	vm.gcc = ml_io_map(GCC_SDCC1_PHYS, 0x1000);
+diff --git a/iokit/Kernel/arm/SweetBattery.cpp b/iokit/Kernel/arm/SweetBattery.cpp
+index f0f3673..2f8f67c 100644
+--- a/iokit/Kernel/arm/SweetBattery.cpp
++++ b/iokit/Kernel/arm/SweetBattery.cpp
+@@ -308,7 +308,12 @@ SweetBattery::start(IOService *provider)
+ #if defined(ARM64_BOARD_CONFIG_VINCE)
+ 	int real = 1;
+ 	(void)PE_parse_boot_argn("sweetbattery", &real, sizeof(real));
++#if defined(VINCE_TULIP)
++	fReal = false;          /* MSM8953 SPMI/PMIC addresses do not exist on SDM636: synthetic battery */
++	(void)real;
++#else
+ 	fReal = real != 0 && vince_pmic_init() == 0;
++#endif
+ #else
+ 	int real = 0;
+ 	(void)PE_parse_boot_argn("sweetbattery", &real, sizeof(real));
+diff --git a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
+index ea033f3..97cb141 100644
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -20,6 +20,15 @@
+ #include <kern/processor.h>
+ #include <mach/mach_time.h>
+ 
++#if defined(VINCE_TULIP)
++/*
++ * tulip (Redmi Note 6 Pro, SDM636): GICv3 with two security states, like sweet. Bring-up is the SWEET boot-CPU
++ * path (ICC_SGI1R_EL1 IPIs, no PSCI, no MSM8953 clock/mark-page access). Secondary cores are a later milestone.
++ */
++#undef VINCE
++#define SWEET 1
++#endif
++
+ #if defined(VINCE)
+ extern "C" {
+ extern vm_offset_t vince_gicd_base;
+@@ -259,8 +268,12 @@ SweetCPU::start(IOService *provider)
+ 	}
+ #if defined(VINCE)
+ 	cpuName = OSSymbol::withCStringNoCopy("Cortex-A53");
++#else
++#if defined(VINCE_TULIP)
++	cpuName = OSSymbol::withCStringNoCopy("Kryo 260");
+ #else
+ 	cpuName = OSSymbol::withCStringNoCopy("Kryo 470");
++#endif
+ #endif
+ 	if (cpuName == NULL) {
+ 		return false;
+diff --git a/iokit/Kernel/arm/SweetPlatformExpert.cpp b/iokit/Kernel/arm/SweetPlatformExpert.cpp
+index 264ef5c..657b73a 100644
+--- a/iokit/Kernel/arm/SweetPlatformExpert.cpp
++++ b/iokit/Kernel/arm/SweetPlatformExpert.cpp
+@@ -81,6 +81,15 @@ vince_rtc_setup(void)
+ 		return;
+ 	}
+ 	vince_rtc_ready = true;
++#if defined(VINCE_TULIP)
++	/* SDM636 has its PMIC RTC behind a different SPMI arbiter; not supported yet: clock fixed at the build time */
++	vince_rtc_ok = false;
++	vince_rtc_offset = (uint32_t)build;
++	(void)sec;
++	(void)off;
++	IOLog("TULIP RTC: no PMIC RTC driver, clock fixed at the build time\n");
++	return;
++#endif
+ 	if (vince_pmic_init() == 0 && vince_pmic_rtc_seconds(&sec) == 0) {
+ 		vince_rtc_ok = true;
+ 		/* a stored offset is believed when it puts the clock between the build time and ten years later */
+diff --git a/makedefs/MakeInc.def b/makedefs/MakeInc.def
+index cbc3499..13630ba 100644
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -62,7 +62,7 @@ MACHINE_FLAGS_ARM64_T6000 = -DARM64_BOARD_CONFIG_T6000 		-mcpu=apple-a14
+ MACHINE_FLAGS_ARM64_VMAPPLE = -DARM64_BOARD_CONFIG_VMAPPLE              -march=armv8.5a
+ MACHINE_FLAGS_ARM64_BCM2837 = -DARM64_BOARD_CONFIG_BCM2837
+ MACHINE_FLAGS_ARM64_SWEET = -DARM64_BOARD_CONFIG_SWEET                -march=armv8.2-a+crypto
+-MACHINE_FLAGS_ARM64_VINCE = -DARM64_BOARD_CONFIG_VINCE -march=armv8-a -mcpu=cortex-a53
++MACHINE_FLAGS_ARM64_VINCE = -DARM64_BOARD_CONFIG_VINCE -DVINCE_TULIP=1 -march=armv8-a -mcpu=cortex-a53
+ 
+ 
+ #
+diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
+index 4ccbe44..3d3aa3c 100644
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -1837,11 +1837,14 @@ static void
+ sweet_early_map_final(void)
+ {
+ 	const vm_map_address_t va = SWEET_EARLY_FB_VA;
+-	assert(va + 4 * ARM_TT_L2_SIZE <= gVirtBase);
++	assert(va + 8 * ARM_TT_L2_SIZE <= gVirtBase);
+ 	tt_entry_t l1 = cpu_tte[(va & ARM_TT_L1_INDEX_MASK) >> ARM_TT_L1_SHIFT];
+ 	assert((l1 & (ARM_TTE_VALID | ARM_TTE_TYPE_MASK)) == (ARM_TTE_VALID | ARM_TTE_TYPE_TABLE));
+ 	tt_entry_t *l2 = (tt_entry_t *)phystokv(l1 & ARM_TTE_TABLE_MASK);
+-#if defined(VINCE)
++#if defined(VINCE_TULIP)
++	const uint64_t fb_phys_base = TULIP_FB_PHYS;
++	const unsigned int fb_num_blocks = TULIP_FB_BLOCKS;
++#elif defined(VINCE)
+ 	const uint64_t fb_phys_base = 0x90000000ULL;
+ 	const unsigned int fb_num_blocks = 4;
+ #else
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+index bd97018..ceff2e1 100644
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1856,7 +1856,7 @@ sleh_irq(arm_saved_state_t *state)
+ #endif
+ 
+ 
+-#if defined(VINCE)
++#if defined(VINCE) && !defined(VINCE_TULIP)
+ 	/*
+ 	 * vince (MSM8953): ARM GICv2 MMIO interface.
+ 	 * INTID is read from GICC_IAR at offset 0x0C.
+@@ -1892,9 +1892,9 @@ sleh_irq(arm_saved_state_t *state)
+ 		*(volatile uint32_t *)(vince_gicc_base + 0x10) = iar; /* GICC_EOIR */
+ 	}
+ 	__builtin_arm_isb(ISB_SY);
+-#elif defined(SWEET)
++#elif defined(SWEET) || defined(VINCE_TULIP)
+ 	/*
+-	 * sweet: TrustZone owns GIC Group 0, so the timer and IPIs that other
++	 * sweet / tulip: TrustZone owns GIC Group 0, so the timer and IPIs that other
+ 	 * ARM64 targets take as FIQs arrive here as Group 1 IRQs.
+ 	 */
+ 	uint64_t iar = __builtin_arm_rsr64("ICC_IAR1_EL1");
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+index 8a45fdd..4b7f86b 100644
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -106,6 +106,13 @@
+  * in the framebuffer carve-out next to the VSCN descriptor; the shim reads it from CPU1 (`r 913f0800 10`).
+  * Clobbers x9-x11.
+  */
++#if defined(VINCE_TULIP)
++/* tulip: no shim mark page; 0x913F0000 is inside a protected carve-out, so these are no-ops */
++.macro VINCE_SMP_MARK code
++.endmacro
++.macro VINCE_SMP_DIAG idx, reg
++.endmacro
++#else
+ .macro VINCE_SMP_MARK code
+ 	mrs		x9, MPIDR_EL1
+ 	and		x10, x9, #0xff
+@@ -131,6 +138,7 @@
+ 	str		\reg, [x9]
+ 	dsb		sy
+ .endmacro
++#endif /* VINCE_TULIP */
+ #endif
+ 
+ 	.globl EXT(LowResetVectorBase)
+@@ -577,7 +585,33 @@ start_cpu:
+ 2:
+ .endmacro
+ 
+-#if defined(VINCE)
++#if defined(VINCE_TULIP)
++/*
++ * tulip: 48x32 colour band at row 2200 of the LK splash framebuffer (0x9d400000, 1080x2280, 32 bpp, stride 4320),
++ * x offset = x_start pixels. Boot CPU only. Clobbers x9-x13.
++ */
++.macro VINCE_STAGE_MARK r, g, b, x_start
++	cbnz	x21, 9f
++	MOV64	x9, (0x9d400000 + 2200 * 4320)
++	add		x9, x9, #(\x_start * 4)
++	mov		x10, #32
++1:
++	mov		x11, #48
++	mov		x12, x9
++2:
++	movz	w13, #((\g << 8) | \b)
++	movk	w13, #(0xff00 | \r), lsl #16
++	str		w13, [x12], #4
++	subs	x11, x11, #1
++	b.ne	2b
++	add		x9, x9, #2160
++	add		x9, x9, #2160				// stride 4320 (> add imm12)
++	subs	x10, x10, #1
++	b.ne	1b
++	dsb		sy
++9:
++.endmacro
++#elif defined(VINCE)
+ .macro VINCE_STAGE_MARK r, g, b, x_start
+ 	/* boot CPU only (x21 = 0): secondaries come through common_start with x21 = their cpu data */
+ 	cbnz	x21, 9f
+@@ -803,12 +837,20 @@ Lkernelcache_base_found:
+ 	 * Splash framebuffer: 4x 2MB Normal-NC blocks (8MB total) at 0x90000000 in V=P L2 table.
+ 	 * Covers 1080x2160x3 (6.998MB) from 0x90001000 to 0x906ADA00 without translation faults.
+ 	 */
++#if defined(VINCE_TULIP)
++	MOV64	x10, 0x9d400000
++#else
+ 	MOV64	x10, 0x90000000
++#endif
+ 	MOV64	x14, (ARM_TTE_TYPE_BLOCK | ARM_TTE_VALID | ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY) | ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_WRITECOMB) | ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX)
+ 	and		x12, x10, #(ARM_TT_L2_INDEX_MASK)
+ 	lsr		x12, x12, #(ARM_TT_L2_SHIFT)
+ 	add		x13, x25, #(2 * PGBYTES)
++#if defined(VINCE_TULIP)
++	mov		x15, #5						// 5 x 2 MiB = 10 MiB >= 1080x2280x4
++#else
+ 	mov		x15, #4
++#endif
+ 1:
+ 	orr		x11, x14, x10
+ 	str		x11, [x13, x12, lsl #TTE_SHIFT]
+diff --git a/osfmk/arm64/sweet_early.c b/osfmk/arm64/sweet_early.c
+index c9effe4..4c6937a 100644
+--- a/osfmk/arm64/sweet_early.c
++++ b/osfmk/arm64/sweet_early.c
+@@ -7,12 +7,20 @@
+ #include <stdint.h>
+ #include <kern/misc_protos.h>
+ 
+-#if defined(VINCE)
++#if defined(VINCE) && !defined(VINCE_TULIP)
+ #define EARLY_FB_PHYS 0x90001000ULL
+ #define EARLY_WIDTH 1080u
+ #define EARLY_HEIGHT 2160u
+ #define EARLY_STRIDE 3240u
+ #define EARLY_BPP 3u
++#elif defined(VINCE_TULIP)
++/* tulip: 32 bpp, 96 pixel rows left free at the top because of the notch / status area */
++#define EARLY_TOP_BYTES (96u * 4320u)
++#define EARLY_FB_PHYS (0x9d400000ULL + EARLY_TOP_BYTES)
++#define EARLY_WIDTH 1080u
++#define EARLY_HEIGHT (2280u - 96u)
++#define EARLY_STRIDE (4320u / 4)
++#define EARLY_BPP 4u
+ #else
+ #define EARLY_FB_PHYS 0x9c000000ULL
+ #define EARLY_WIDTH 1080u
+@@ -27,8 +35,10 @@ void
+ sweet_early_relocate(uint64_t base)
+ {
+ 	sweet_early_mark(8, "leaving bootstrap TTBR0");
+-#if defined(VINCE)
++#if defined(VINCE) && !defined(VINCE_TULIP)
+ 	early_fb = (volatile uint8_t *)(uintptr_t)(base + 0x1000);
++#elif defined(VINCE_TULIP)
++	early_fb = (volatile uint8_t *)(uintptr_t)(base + EARLY_TOP_BYTES);
+ #else
+ 	early_fb = (volatile uint8_t *)(uintptr_t)base;
+ #endif
+@@ -51,7 +61,7 @@ static void
+ early_clear_row(void)
+ {
+ 	for (unsigned int y = 0; y < EARLY_CELL_H; y++) {
+-#if defined(VINCE)
++#if defined(VINCE) && !defined(VINCE_TULIP)
+ 		volatile uint8_t *line = early_fb + (early_row * EARLY_CELL_H + y) * EARLY_STRIDE;
+ 		for (unsigned int x = 0; x < EARLY_WIDTH * 3; x++) {
+ 			line[x] = 0;
+@@ -90,7 +100,7 @@ sweet_early_putc(char c)
+ 	const unsigned char *glyph = iso_font + (unsigned char)c * 16;
+ 	for (unsigned int gy = 0; gy < 16; gy++) {
+ 		for (unsigned int sy = 0; sy < EARLY_SCALE; sy++) {
+-#if defined(VINCE)
++#if defined(VINCE) && !defined(VINCE_TULIP)
+ 			volatile uint8_t *line = early_fb +
+ 			    (early_row * EARLY_CELL_H + gy * EARLY_SCALE + sy) * EARLY_STRIDE +
+ 			    early_col * EARLY_CELL_W * 3;
+@@ -161,7 +171,7 @@ sweet_early_mark(unsigned int stage, const char *label)
+ 	if (early_disabled || stage > 20) {
+ 		return;
+ 	}
+-#if defined(VINCE)
++#if defined(VINCE) && !defined(VINCE_TULIP)
+ 	for (unsigned int y = EARLY_HEIGHT - 32; y < EARLY_HEIGHT; y++) {
+ 		volatile uint8_t *line = early_fb + y * EARLY_STRIDE;
+ 		for (unsigned int x = stage * 48; x < (stage + 1) * 48; x++) {
+diff --git a/pexpert/arm/pe_fiq.c b/pexpert/arm/pe_fiq.c
+index 336b767..6d3ad9e 100644
+--- a/pexpert/arm/pe_fiq.c
++++ b/pexpert/arm/pe_fiq.c
+@@ -17,7 +17,7 @@
+ #define GICR_WAKE_TIMEOUT_NS (1000000000ULL) // timeout for redistributor wakeup (default 1s)
+ MACHINE_TIMEOUT(gicr_wake_timeout_ns, "gicr-wake-timeout", GICR_WAKE_TIMEOUT_NS, MACHINE_TIMEOUT_UNIT_NSEC, NULL);
+ 
+-#if defined(SWEET)
++#if defined(SWEET) || defined(VINCE_TULIP)
+ /* Phone default; QEMU virt wires the architected virtual timer to INTID 27. */
+ SECURITY_READ_ONLY_LATE(uint32_t) sweet_vtimer_intid = SWEET_VTIMER_INTID;
+ #endif
+@@ -102,7 +102,7 @@ pe_init_fiq()
+ 			panic("%s: incorrect reg property size in GIC DT node; expecting 32 bytes but got %u bytes", __func__, prop_size);
+ 		}
+ 
+-#if defined(SWEET)
++#if defined(SWEET) || defined(VINCE_TULIP)
+ 		/* Read only on the boot CPU, before the GIC and RO-late lockdown. */
+ 		void const *timer_prop;
+ 		unsigned int timer_size;
+@@ -164,7 +164,7 @@ pe_init_fiq()
+ 		}
+ 	}
+ 
+-#if defined(SWEET)
++#if defined(SWEET) || defined(VINCE_TULIP)
+ 	/*
+ 	 * Real hardware with two security states: Group 0 is TrustZone's and
+ 	 * non-secure writes to it are ignored. Everything we own is Group 1 NS
+@@ -182,7 +182,7 @@ pe_init_fiq()
+ 
+ 	// Enable PPI 27
+ 	gicr_write32(GICR_ISENABLER0, (1 << 27));
+-#endif /* SWEET */
++#endif /* SWEET || VINCE_TULIP */
+ 
+ 	// Enable system register access
+ 	uint64_t icc_sre = __builtin_arm_rsr64("ICC_SRE_EL1");
+@@ -190,12 +190,12 @@ pe_init_fiq()
+ 	__builtin_arm_wsr64("ICC_SRE_EL1", icc_sre);
+ 	__builtin_arm_isb(ISB_SY);
+ 
+-#if defined(SWEET)
++#if defined(SWEET) || defined(VINCE_TULIP)
+ 	__builtin_arm_wsr64("ICC_BPR1_EL1", 0);
+ #else
+ 	// Set priority masks and binary point for group 0
+ 	__builtin_arm_wsr64("ICC_BPR0_EL1", 0);
+-#endif /* SWEET */
++#endif /* SWEET || VINCE_TULIP */
+ 	__builtin_arm_wsr64("ICC_PMR_EL1", 0xFF);
+ 
+ 	// Set EOI mode of this processor
+@@ -203,7 +203,7 @@ pe_init_fiq()
+ 	icc_ctlr &= ~ICC_CTLR_EOIMODE;
+ 	__builtin_arm_wsr64("ICC_CTLR_EL1", icc_ctlr);
+ 
+-#if defined(SWEET)
++#if defined(SWEET) || defined(VINCE_TULIP)
+ 	// ABL leaves only ARE_NS set; Linux writes ARE_NS | EnableGrp1A | EnableGrp1
+ 	uint32_t gicd_ctlr = gicd_read32(GICD_CTLR);
+ 	gicd_ctlr |= GICD_CTLR_ARE_NS | GICD_CTLR_ENABLEGRP1A | GICD_CTLR_ENABLEGRP1;
+@@ -220,7 +220,7 @@ pe_init_fiq()
+ 	gicd_write32(GICD_CTLR, gicd_ctlr);
+ 	__builtin_arm_wsr64("ICC_IGRPEN0_EL1", 1);
+ 	__builtin_arm_isb(ISB_SY);
+-#endif /* SWEET */
++#endif /* SWEET || VINCE_TULIP */
+ }
+ #else
+ #if defined(VINCE)
+diff --git a/pexpert/arm/pe_serial.c b/pexpert/arm/pe_serial.c
+index f6a7968..6c2195a 100644
+--- a/pexpert/arm/pe_serial.c
++++ b/pexpert/arm/pe_serial.c
+@@ -720,7 +720,7 @@ extern unsigned char iso_font[256 * 16];
+ #define FBCON_BG_B      0x00
+ 
+ static volatile uint8_t *fbcon_base;
+-static uint32_t fbcon_width, fbcon_height, fbcon_stride;
++static uint32_t fbcon_width, fbcon_height, fbcon_stride, fbcon_bpp = 3;   /* bytes per pixel */
+ static uint32_t fbcon_cols, fbcon_rows, fbcon_col, fbcon_row;
+ 
+ static void
+@@ -729,9 +729,12 @@ fbcon_clear_row(uint32_t row)
+ 	for (uint32_t y = row * 16 * FBCON_SCALE; y < (row + 1) * 16 * FBCON_SCALE; y++) {
+ 		volatile uint8_t *line = fbcon_base + y * fbcon_stride;
+ 		for (uint32_t x = 0; x < fbcon_width; x++) {
+-			line[x * 3 + 0] = FBCON_BG_B;
+-			line[x * 3 + 1] = FBCON_BG_G;
+-			line[x * 3 + 2] = FBCON_BG_R;
++			line[x * fbcon_bpp + 0] = FBCON_BG_B;
++			line[x * fbcon_bpp + 1] = FBCON_BG_G;
++			line[x * fbcon_bpp + 2] = FBCON_BG_R;
++			if (fbcon_bpp == 4) {
++				line[x * 4 + 3] = 0xff;
++			}
+ 		}
+ 	}
+ }
+@@ -787,10 +790,13 @@ fbcon_transmit_data(uint8_t c)
+ 				uint8_t g = bit ? FBCON_FG_G : FBCON_BG_G;
+ 				uint8_t b = bit ? FBCON_FG_B : FBCON_BG_B;
+ 				for (uint32_t sx = 0; sx < FBCON_SCALE; sx++) {
+-					uint32_t px = (x0 + gx * FBCON_SCALE + sx) * 3;
++					uint32_t px = (x0 + gx * FBCON_SCALE + sx) * fbcon_bpp;
+ 					line[px + 0] = b;
+ 					line[px + 1] = g;
+ 					line[px + 2] = r;
++					if (fbcon_bpp == 4) {
++						line[px + 3] = 0xff;
++					}
+ 				}
+ 			}
+ 		}
+@@ -842,7 +848,10 @@ fbcon_probe(void)
+ 	if (SecureDTGetProperty(entry, "stride", (void const **)&val, &size) == kSuccess) {
+ 		fbcon_stride = *val;
+ 	}
+-	if (!fbcon_width || !fbcon_height || fbcon_stride < fbcon_width * 3) {
++	if (SecureDTGetProperty(entry, "bpp", (void const **)&val, &size) == kSuccess && *val == 32) {
++		fbcon_bpp = 4;
++	}
++	if (!fbcon_width || !fbcon_height || fbcon_stride < fbcon_width * fbcon_bpp) {
+ 		return;
+ 	}
+ 	fbcon_base = (volatile uint8_t *)ml_io_map_wcomb(reg[0], reg[1]);
+diff --git a/pexpert/pexpert/arm/protos.h b/pexpert/pexpert/arm/protos.h
+index 9cd4575..fff2391 100644
+--- a/pexpert/pexpert/arm/protos.h
++++ b/pexpert/pexpert/arm/protos.h
+@@ -36,7 +36,7 @@ void uart_putc_options(char, bool);
+ int uart_getc(void);
+ 
+ void pe_init_fiq(void);
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(VINCE_TULIP)
+ extern uint32_t sweet_vtimer_intid;
+ #elif defined(ARM64_BOARD_CONFIG_VINCE)
+ extern uint32_t vince_vtimer_intid;
+diff --git a/pexpert/pexpert/arm64/VINCE.h b/pexpert/pexpert/arm64/VINCE.h
+index e008bb3..2487a21 100644
+--- a/pexpert/pexpert/arm64/VINCE.h
++++ b/pexpert/pexpert/arm64/VINCE.h
+@@ -29,7 +29,44 @@
+ #undef __ARM64_PMAP_SUBPAGE_L1__
+ #undef ARM_PARAMETERIZED_PMAP
+ 
++#if defined(VINCE_TULIP)
++/*
++ * Redmi Note 6 Pro ("tulip", Qualcomm SDM636): Kryo 260 (A53/A73 class, ARMv8.0), GICv3 with two security
++ * states (like sweet: Group 0 is TrustZone's, everything we own is Group 1 NS and arrives as an IRQ),
++ * 4 KiB pages. Qualcomm numbers the architected timer PPIs 1/2/3/0, so CNTV is INTID 16 + 3 = 19.
++ * GIC addresses and the timer INTID come from the ADT (/arm-io/gic), measured values are only fallbacks.
++ */
++#define HAS_GIC_V3                1
++#define SWEET_VTIMER_INTID        19
++#define SWEET_IPI_SGI             1
++#define GICR_PE_SIZE              0x20000
++#define GICD_CTLR                 0x0
++#define GICD_CTLR_ENABLEGRP1      0x1
++#define GICD_CTLR_ENABLEGRP1A     0x2
++#define GICD_CTLR_ARE_NS          0x10
++#define GICD_CTLR_RWP             0x80000000
++#define GICR_TYPER                              0x08
++#define GICR_WAKER                              0x14
++#define GICR_IGROUPR0                           0x10080
++#define GICR_ISENABLER0                         0x10100
++#define GICR_IPRIORITYR0                        0x10400
++#define GICR_TYPER_AFFINITY_VALUE_SHIFT         32
++#define GICR_TYPER_LAST                         0x10
++#define GICR_WAKER_PROCESSORSLEEP               0x2
++#define GICR_WAKER_CHILDRENASLEEP               0x4
++#define ICC_CTLR_EOIMODE                        0x2
++#define ICC_SRE_SRE                             0x1
++#define SDM636_GICD_BASE          0x17a00000ULL
++#define SDM636_GICR_BASE          0x17b00000ULL
++/* LK's continuous-splash framebuffer: 1080x2280, 32 bpp (B,G,R,X), stride 4320, 36 MiB reserved */
++#define TULIP_FB_PHYS             0x9d400000ULL
++#define TULIP_FB_WIDTH            1080u
++#define TULIP_FB_HEIGHT           2280u
++#define TULIP_FB_STRIDE           4320u
++#define TULIP_FB_BLOCKS           5       /* 2 MiB blocks mapped for it (10 MiB >= 9.85 MiB) */
++#else
+ #define HAS_GIC_V2                1
++#endif
+ 
+ #ifndef ASSEMBLER
+ #define PLATFORM_PANIC_LOG_DISABLED
