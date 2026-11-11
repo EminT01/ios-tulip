@@ -10,3 +10,25 @@ out/
 *.dSYM
 *.log
 .DS_Store
+
+# local artifacts / dumps (never commit)
+out/
+shim-tulip/out/
+panic-out/
+pram-out/
+full-out/
+qemu-out/
+qemu-test/
+qemu-gic3/
+qemu-max/
+qemu-fix/
+gdb-out/
+gdb2/
+gdb3/
+*.bin
+!xnu/patches/*.bin
+tc.bin
+kernel/
+kernel.*/
+*.zip
+*:Zone.Identifier

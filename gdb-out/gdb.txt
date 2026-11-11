@@ -1,0 +1,13 @@
+
+set pagination off
+set confirm off
+target remote :1234
+break *0xfffffff007b16d64
+break *0xfffffff007b16d68
+continue
+printf "\n=== PANIC HIT ===\n"
+info registers x0 x1 x2 x3 x29 x30
+x/s $x0
+bt
+kill
+quit
