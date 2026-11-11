@@ -123,6 +123,10 @@ jobs:
         run: |
           set -e
           export DEBIAN_FRONTEND=noninteractive
+          sudo sh -c 'echo "nameserver 8.8.8.8" > /etc/resolv.conf'
+          sudo sh -c 'echo "nameserver 1.1.1.1" >> /etc/resolv.conf'
+          sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt 2>/dev/null || true
+          sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true
           # Runner'da zaten var; yoksa 3 kez dene, DNS hatasında patlama
           if ! command -v clang >/dev/null || ! command -v ld.lld >/dev/null \
              || ! command -v llvm-objcopy >/dev/null; then
