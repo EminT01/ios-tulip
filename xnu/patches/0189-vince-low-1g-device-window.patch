@@ -1,0 +1,17 @@
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -1,2 +1,14 @@
+ 	/* Stage 0B: green 48x32 band - bootstrap V=P, KVA and FB mapped */
+ 	VINCE_STAGE_MARK 0x00, 0xff, 0x00, 96
++	/*
++	 * Low 1 GiB device window as a single L1 block in the V=P root.
++	 * pe_init_fiq() runs before ml_io_map() can hand out a usable VA, so
++	 * GICD/GICR must already be reachable: QEMU virt GICv3 at 0x08000000
++	 * (GICR 0x080A0000), tulip at 0x17A00000 (GICR 0x17B00000). Device
++	 * memory, not Normal-NC: GIC registers must not be cached.
++	 */
++	MOV64 x10, 0
++	MOV64 x11, (ARM_TTE_TYPE_BLOCK | ARM_TTE_VALID | ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY) | ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_DISABLE) | ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX)
++	orr x11, x11, x10
++	str x11, [x25]
++	dsb ish
