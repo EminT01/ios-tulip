@@ -1,0 +1,27 @@
+diff --git a/osfmk/prng/prng_random.c b/osfmk/prng/prng_random.c
+index d1b5339..b9a72bb 100644
+--- a/osfmk/prng/prng_random.c
++++ b/osfmk/prng/prng_random.c
+@@ -56,6 +56,22 @@ bootseed_init_bootloader(const struct ccdigest_info * di, ccdigest_ctx_t ctx)
+ 	uint32_t n;
+ 
+ 	n = PE_get_random_seed(seed, sizeof(seed));
++#if defined(VINCE_TULIP)
++	if (n < sizeof(seed)) {
++		/*
++		 * tulip bring-up: the ADT seed was not delivered (n bytes). Do not stop here: mix the counter and a
++		 * pattern instead so the rest of the boot can be observed. NOT a secure seed; fix before real use.
++		 */
++		extern void sweet_early_mark(unsigned int stage, const char *label);
++		uint64_t t = ml_get_timebase();
++		sweet_early_mark(9, n ? "PRNG: short boot seed, using timebase fallback" : "PRNG: no boot seed, using timebase fallback");
++		for (uint32_t i = 0; i < sizeof(seed); i++) {
++			t = t * 6364136223846793005ULL + 1442695040888963407ULL + i;
++			seed[i] = (uint8_t)(t >> 56);
++		}
++		n = sizeof(seed);
++	}
++#endif
+ 	if (n < sizeof(seed)) {
+ 		/*
+ 		 * Insufficient entropy is fatal.  We must fill the
