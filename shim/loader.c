@@ -1,5 +1,6 @@
 /*
- * Vince iBoot-like loader for XNU Mach-O payload on Snapdragon 625 (MSM8953)
+typedef void (*xnu_entry_t)(uint64_t boot_args_pa);
+ * tulip iBoot-like loader for the XNU Mach-O payload (Redmi Note 6 Pro, SDM636); derived from ios-vince
  */
 #include <stdint.h>
 #include "console.h"
@@ -72,6 +73,39 @@ static int magic_ok(const char *m)
 
 typedef void (*xnu_entry_t)(uint64_t boot_args_pa);
 
+/* === YENI EKLENEN FONKSIYON === */
+/* ADT kopyasindaki random-seed'i tazele. 1 = bulundu ve yazildi */
+static int adt_patch_seed(uintptr_t adt, uint64_t adt_size)
+{
+    static const char key[] = "random-seed";
+    volatile uint8_t *b = (volatile uint8_t *)adt;
+
+    for (uint64_t i = 0; i + 40 <= adt_size; i++) {
+        if (b[i + 11] != 0) continue;
+        int ok = 1;
+        for (int k = 0; k < 11; k++)
+            if (b[i + k] != (uint8_t)key[k]) { ok = 0; break; }
+        if (!ok) continue;
+
+        uint32_t len = (uint32_t)b[i+32] | ((uint32_t)b[i+33] << 8)
+                     | ((uint32_t)b[i+34] << 16) | ((uint32_t)b[i+35] << 24);
+        len &= 0x7fffffffu;
+        if (len == 0 || len > 256 || i + 36 + len > adt_size) continue;
+
+        for (uint32_t k = 0; k < len; k++)
+            b[i + 36 + k] = (uint8_t)(0x5a ^ (uint8_t)(k * 31 + 7));
+
+        con_hex("SEEDOFF", i + 36);
+        con_hex("SEEDLEN", len);
+        con_hex("S0", (uintptr_t)((uint32_t)b[i+36] | ((uint32_t)b[i+37] << 8)
+                    | ((uint32_t)b[i+38] << 16) | ((uint32_t)b[i+39] << 24)));
+
+        return 1;
+    }
+    return 0;
+}
+/* === EKLENEN KOD BITTI === */
+
 const char *loader_boot(uintptr_t dtb)
 {
 	uint64_t rd_start, rd_end;
@@ -118,7 +152,7 @@ const char *loader_boot(uintptr_t dtb)
 	ba->Video.v_rowBytes = FB_STRIDE;
 	ba->Video.v_width = FB_W;
 	ba->Video.v_height = FB_H;
-	ba->Video.v_depth = 24;
+	ba->Video.v_depth = FB_BPP;
 	ba->deviceTreeP = adt_pa - pa_of_va_base;
 	ba->deviceTreeLength = (uint32_t)p->adt_size;
 	for (int i = 0; i < BOOT_LINE_LENGTH; i++)
@@ -135,7 +169,11 @@ const char *loader_boot(uintptr_t dtb)
 		__asm__ volatile("dc civac, %0" : : "r"(a) : "memory");
 	}
 	__asm__ volatile("dsb sy" ::: "memory");
+	con_str("ENTER", "jumping to XNU, watch the bands");
 
+	/* quiesce the diagnostic state: virtual timer off, all exceptions masked */
+	__asm__ volatile("msr cntv_ctl_el0, xzr" ::: "memory");
+	__asm__ volatile("msr daifset, #0xf" ::: "memory");
 	/* Disable MMU and D-cache so XNU enters with clean flat physical addressing */
 	uint64_t sctlr;
 	__asm__ volatile("mrs %0, sctlr_el1" : "=r"(sctlr));
@@ -152,6 +190,12 @@ const char *loader_boot(uintptr_t dtb)
 		"isb\n"
 		::: "memory"
 	);
+
+        if (adt_patch_seed(adt_pa, p->adt_size))
+		con_str("SEED", "FOUND + patched");
+	else
+		con_str("SEED", "NOT FOUND in ADT");
+	__asm__ volatile("dsb sy" ::: "memory");
 
 	((xnu_entry_t)entry_pa)(ba_pa);
 	return "xnu returned";
