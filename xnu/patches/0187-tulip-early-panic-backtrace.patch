@@ -1,0 +1,31 @@
+diff --git a/osfmk/arm64/sweet_early.c b/osfmk/arm64/sweet_early.c
+index 4c6937a..2283464 100644
+--- a/osfmk/arm64/sweet_early.c
++++ b/osfmk/arm64/sweet_early.c
+@@ -212,6 +212,26 @@ sweet_early_panic(const char *fmt, va_list *args)
+ 	_doprnt(fmt, &copy, sweet_early_putc, 16);
+ 	va_end(copy);
+ 	sweet_early_putc('\n');
++#if defined(VINCE_TULIP)
++	/* the format string alone is often not enough: print the return-address chain (frame pointers) */
++	{
++		uint64_t *fp = (uint64_t *)__builtin_frame_address(0);
++		sweet_early_string("BT:");
++		for (int i = 0; i < 12 && fp != 0 && ((uintptr_t)fp & 7) == 0 && (uintptr_t)fp > 0xfffffff000000000ULL; i++) {
++			uint64_t lr = fp[1];
++			sweet_early_string(" ");
++			for (int sh = 28; sh >= 0; sh -= 4) {
++				sweet_early_putc("0123456789abcdef"[(lr >> sh) & 0xf]);
++			}
++			uint64_t *next = (uint64_t *)fp[0];
++			if (next <= fp) {
++				break;
++			}
++			fp = next;
++		}
++		sweet_early_putc('\n');
++	}
++#endif
+ 	__asm__ volatile("dsb sy" ::: "memory");
+ }
+ 
