@@ -577,3 +577,14 @@ tulip_virtio_blk_init(void)
 	}
 	printf("virtio-blk: no block device on the bus\n");
 }
+
+/* Root device for rd=rvblk0 (called from setconf in bsd_init.c). */
+int
+tulip_virtio_blk_rootdev(dev_t *dev)
+{
+	if (!blk_ready) {
+		return ENXIO;
+	}
+	*dev = makedev(blk_bmajor, 0);
+	return 0;
+}

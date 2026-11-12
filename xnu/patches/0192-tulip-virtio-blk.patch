@@ -1,12 +1,6 @@
 --- /dev/null
 +++ b/bsd/dev/tulip_virtio_blk.c
-@@ -0,0 +1,585 @@
-+/*
-+ * Adapted from HakiOS (github.com/oosexgang/hakios-xnu-kernel),
-+ * drivers/storage/hakios.virtio_blk.c -- APSL 2.0.
-+ * Tulip: unchanged logic, renamed. QEMU virtio-mmio block device.
-+ * Boot-arg virtio_blk=1 -> /dev/rvblk0.
-+ */
+@@ -0,0 +1,590 @@
 +/*
 + * Adapted from HakiOS (github.com/oosexgang/hakios-xnu-kernel),
 + * drivers/storage/hakios.virtio_blk.c -- APSL 2.0.
@@ -586,25 +580,36 @@
 +	}
 +	printf("virtio-blk: no block device on the bus\n");
 +}
++
++/* Root device for rd=rvblk0 (called from setconf in bsd_init.c). */
++int
++tulip_virtio_blk_rootdev(dev_t *dev)
++{
++	if (!blk_ready) {
++		return ENXIO;
++	}
++	*dev = makedev(blk_bmajor, 0);
++	return 0;
++}
 --- a/bsd/kern/bsd_init.c
 +++ b/bsd/kern/bsd_init.c
-@@ -867,10 +867,16 @@
+@@ -1136,10 +1136,16 @@
+ {
+ 	u_int32_t       flags;
+ 	kern_return_t   err;
  
- 	bsd_init_kprintf("calling inittodr\n");
- 	inittodr(0);
- 
- 	/* Mount the root file system. */
+ 	err = IOFindBSDRoot(rootdevice, sizeof(rootdevice), &rootdev, &flags);
 +	#if defined(VINCE_TULIP)
-+	{
-+		extern void tulip_virtio_blk_init(void);
-+		tulip_virtio_blk_init();   /* QEMU: virtio_blk=1 -> /dev/rvblk0 */
++	if (err && strncmp(rootdevice, "rvblk0", 6) == 0) {
++		extern int tulip_virtio_blk_rootdev(dev_t *);
++		err = tulip_virtio_blk_rootdev(&rootdev);
 +	}
 +	#endif
- 	while (TRUE) {
- 		int err;
- 
- 		bsd_init_kprintf("calling setconf\n");
- 		setconf();
+ 	if (err) {
+ 		printf("setconf: IOFindBSDRoot returned an error (%d);"
+ 		    "setting rootdevice to 'sd0a'.\n", err);     /* XXX DEBUG TEMP */
+ 		rootdev = makedev( 6, 0 );
+ 		strlcpy(rootdevice, "sd0a", sizeof(rootdevice));
 --- a/bsd/conf/files
 +++ b/bsd/conf/files
 @@ -663,3 +663,5 @@

@@ -5,6 +5,7 @@ PAY,OUT = sys.argv[1], sys.argv[2]
 SECS = float(sys.argv[3]) if len(sys.argv)>3 else 60
 SAMPLE = float(sys.argv[4]) if len(sys.argv)>4 else 10
 FB,W,H,BPP = 0x9d400000,1080,2280,4
+ROOTFS = os.environ.get('ROOTFS','rootfs.img')
 
 p=open(PAY,'rb').read()
 ns=struct.unpack_from('<I',p,12)[0]
@@ -32,7 +33,10 @@ pr=subprocess.Popen(['qemu-system-aarch64','-M','virt,gic-version=3','-cpu','cor
  '-d','int,guest_errors','-D',f'{OUT}/qemu.log',
  '-device',f'loader,file={OUT}/ram.bin,addr={start:#x},force-raw=on',
  '-device',f'loader,file={OUT}/stub.bin,addr=0x40200000,force-raw=on',
- '-device','loader,addr=0x40200000,cpu-num=0'],stdin=subprocess.DEVNULL)
+ '-device','loader,addr=0x40200000,cpu-num=0',
+ '-global','virtio-mmio.force-legacy=false',
+ '-drive','file='+ROOTFS+',format=raw,if=none,id=d0,readonly=on',
+ '-device','virtio-blk-device,drive=d0'],stdin=subprocess.DEVNULL)
 print(f"[*] img_start={start:#x} boot_args={ba_pa:#x} entry={ent+delta:#x}",file=sys.stderr)
 time.sleep(3)
 s=socket.socket(socket.AF_UNIX);s.settimeout(30);s.connect(mon)

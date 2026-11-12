@@ -38,3 +38,4 @@ qemu-*/
 fb-from-dump.png
 .fbpath
 __pycache__/
+upstream/
