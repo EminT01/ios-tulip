@@ -1,22 +1,39 @@
 --- a/osfmk/arm64/arm_vm_init.c
 +++ b/osfmk/arm64/arm_vm_init.c
-@@ -2240,10 +2240,19 @@
- 	kva_active = TRUE;
- 	// global table pointers may need to be different due to physical aperture remapping
- 	cpu_tte = (tt_entry_t*)(phystokv(cpu_ttep));
- 	invalid_tte = (tt_entry_t*)(phystokv(invalid_ttep));
- 	sweet_early_mark(11, "physmap table pointers rebound");
-+	#if defined(VINCE_TULIP)
-+	   /* TTBR0 is gone: the DT must now be reached through the physmap. */
-+	   {
-+	           extern void PE_slide_devicetree(vm_offset_t);
-+	           PE_state.deviceTreeHead = (void *)(uintptr_t)phystokv((vm_offset_t)(uintptr_t)PE_state.deviceTreeHead);
-+	           PE_slide_devicetree(0);
-+	           sweet_early_hex((uint64_t)(uintptr_t)PE_state.deviceTreeHead);
-+	   }
-+	#endif
+@@ -1283,12 +1283,20 @@
  
- 	// From here on out, we're off the bootstrap translation tables.
+ 	DTEntry memory_map;
+ 	int err;
  
+ 	// Device Tree portion of EXTRADATA
+ 	if (SecureDTIsLockedDown()) {
++		#if defined(VINCE_TULIP)
++		/* boot_args carries the DT as a physical address (V=P). Move it to KVA
++		 * here, exactly like the trust cache below. */
++		extern void PE_slide_devicetree(vm_offset_t);
++		PE_state.deviceTreeHead = (void *)(uintptr_t)phystokv((vm_offset_t)(uintptr_t)PE_state.deviceTreeHead);
++		PE_slide_devicetree(0);
++		tulip_early_hex("DT kva", (uint64_t)(uintptr_t)PE_state.deviceTreeHead);
++		#endif
+ 		segEXTRADATA = (vm_offset_t)PE_state.deviceTreeHead;
+ 		segSizeEXTRADATA = PE_state.deviceTreeSize;
+ 	}
  
- 	/* AuxKC initialization has to be deferred until this point, since
+ 	// Trust Caches portion of EXTRADATA
+ 	{
+@@ -1343,13 +1351,15 @@
+ 			tulip_early_hex("DT head", (uint64_t)PE_state.deviceTreeHead);
+ 			tulip_early_hex("DT size", (uint64_t)PE_state.deviceTreeSize);
+ 			tulip_early_hex("DT locked", (uint64_t)SecureDTIsLockedDown());
+ 			tulip_early_hex("segTRUSTCACHE", segTRUSTCACHE);
+ 			tulip_early_hex("segSizeTRUSTCACHE", segSizeTRUSTCACHE);
+ #endif
++			#if !defined(VINCE_TULIP)
+ 			panic("EXTRADATA is in an unexpected place: %#lx > %#lx", segEXTRADATA, segLOWEST);
++			#endif
+ 		}
+ 
+ 		arm_vm_page_granular_RNX(segEXTRADATA, segSizeEXTRADATA, ARM64_GRANULE_ALLOW_BLOCK | ARM64_GRANULE_ALLOW_HINT);
+ 	}
+ 
+ 	const DTMemoryMapRange *auxKC_range, *auxKC_header_range;
