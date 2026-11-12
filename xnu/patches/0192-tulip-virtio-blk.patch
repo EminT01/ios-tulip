@@ -1,0 +1,27 @@
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -876,10 +876,16 @@
+ 		setconf();
+ #if CONFIG_NETBOOT
+ 		netboot = (mountroot == netboot_mountroot);
+ #endif
+ 
++		#if defined(VINCE_TULIP)
++		{
++			extern void tulip_virtio_blk_init(void);
++			tulip_virtio_blk_init();   /* QEMU: virtio_blk=1 -> /dev/rvblk0 */
++		}
++		#endif
+ 		bsd_init_kprintf("vfs_mountroot\n");
+ 		if (0 == (err = vfs_mountroot())) {
+ 			break;
+ 		}
+ 		rootdevice[0] = '\0';
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -663,3 +663,5 @@
+ bsd/skywalk/packet/pbufpool.c			optional skywalk
+ bsd/skywalk/packet/pbufpool_kern.c		optional skywalk
+ bsd/dev/cpu_copy_in_cksum_gen.c			optional skywalk
++
++bsd/dev/tulip_virtio_blk.c	standard
