@@ -32,3 +32,9 @@ kernel/
 kernel.*/
 *.zip
 *:Zone.Identifier
+
+# qemu runs & local scripts
+qemu-*/
+fb-from-dump.png
+.fbpath
+__pycache__/
