@@ -135,7 +135,7 @@ def build_tulip_adt(seed=None):
     ])
 
     # SDHCI eMMC Storage Node
-    sdhci_node = node('sdhci', [
+    sdhci_node = node('sweet-ufs', [
         ph(),
         ('compatible', cstr('generic-sdhci') + cstr('qcom,sdhci-msm-v5') + b'\0'),
         ('reg', u64(SDHCI, SDHCI_SIZE, SDHCI_CORE, 0x1000)),
