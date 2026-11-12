@@ -1,44 +1,28 @@
 --- a/osfmk/arm64/arm_vm_init.c
 +++ b/osfmk/arm64/arm_vm_init.c
-@@ -1282,16 +1282,18 @@
- 	}
- 
- 	DTEntry memory_map;
- 	int err;
- 
- 	// Device Tree portion of EXTRADATA
-+		#if !defined(VINCE_TULIP)
- 	if (SecureDTIsLockedDown()) {
- 		segEXTRADATA = (vm_offset_t)PE_state.deviceTreeHead;
- 		segSizeEXTRADATA = PE_state.deviceTreeSize;
- 	}
-+		#endif
- 
- 	// Trust Caches portion of EXTRADATA
- 	{
- 		DTMemoryMapRange const *trustCacheRange;
- 		unsigned int trustCacheRangeSize;
- 
-@@ -2239,12 +2241,22 @@
- 	sweet_early_mark(10, "TTBR0 off; TLB flushed");
+@@ -2242,12 +2242,25 @@
  	kva_active = TRUE;
  	// global table pointers may need to be different due to physical aperture remapping
  	cpu_tte = (tt_entry_t*)(phystokv(cpu_ttep));
  	invalid_tte = (tt_entry_t*)(phystokv(invalid_ttep));
  	sweet_early_mark(11, "physmap table pointers rebound");
-+	#if defined(VINCE_TULIP)
-+	/* TTBR0 is gone. Re-point the DT at its physmap address and
-+	 * restart the SecureDT machinery on it. */
+ 	#if defined(VINCE_TULIP)
 +	{
 +		extern void PE_slide_devicetree(vm_offset_t);
-+		PE_state.deviceTreeHead = (void *)(uintptr_t)phystokv((vm_offset_t)(uintptr_t)PE_state.deviceTreeHead);
++		vm_offset_t dt = (vm_offset_t)(uintptr_t)PE_state.deviceTreeHead;
++		/* boot_args may carry a physical address (shim) or a VA (QEMU
++		 * harness). Only a PA needs moving onto the physmap. */
++		if (dt < (vm_offset_t)gVirtBase) {
++			PE_state.deviceTreeHead = (void *)(uintptr_t)phystokv(dt);
++		}
 +		PE_slide_devicetree(0);
 +		sweet_early_hex((uint64_t)(uintptr_t)PE_state.deviceTreeHead);
 +	}
 +	#endif
- 
- 	// From here on out, we're off the bootstrap translation tables.
- 
- 
- 	/* AuxKC initialization has to be deferred until this point, since
- 	 * the AuxKC may not have been fully mapped in the bootstrap
++	#if defined(VINCE_TULIP)
+ 	/* TTBR0 is gone. Re-point the DT at its physmap address and
+ 	 * restart the SecureDT machinery on it. */
+ 	{
+ 		extern void PE_slide_devicetree(vm_offset_t);
+ 		PE_state.deviceTreeHead = (void *)(uintptr_t)phystokv((vm_offset_t)(uintptr_t)PE_state.deviceTreeHead);
+ 		PE_slide_devicetree(0);
