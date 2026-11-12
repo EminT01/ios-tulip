@@ -618,3 +618,22 @@
  bsd/dev/cpu_copy_in_cksum_gen.c			optional skywalk
 +
 +bsd/dev/tulip_virtio_blk.c	standard
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -855,10 +855,16 @@
+ 
+ 	bsd_init_kprintf("calling inittodr\n");
+ 	inittodr(0);
+ 
+ 	/* Mount the root file system. */
++	#if defined(VINCE_TULIP)
++	{
++		extern void tulip_virtio_blk_init(void);
++		tulip_virtio_blk_init();   /* QEMU: virtio_blk=1 -> /dev/rvblk0 */
++	}
++	#endif
+ 	while (TRUE) {
+ 		int err;
+ 
+ 		bsd_init_kprintf("calling setconf\n");
+ 		setconf();
