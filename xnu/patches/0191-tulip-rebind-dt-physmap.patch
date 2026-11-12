@@ -1,0 +1,22 @@
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -2240,10 +2240,19 @@
+ 	kva_active = TRUE;
+ 	// global table pointers may need to be different due to physical aperture remapping
+ 	cpu_tte = (tt_entry_t*)(phystokv(cpu_ttep));
+ 	invalid_tte = (tt_entry_t*)(phystokv(invalid_ttep));
+ 	sweet_early_mark(11, "physmap table pointers rebound");
++	#if defined(VINCE_TULIP)
++	   /* TTBR0 is gone: the DT must now be reached through the physmap. */
++	   {
++	           extern void PE_slide_devicetree(vm_offset_t);
++	           PE_state.deviceTreeHead = (void *)(uintptr_t)phystokv((vm_offset_t)(uintptr_t)PE_state.deviceTreeHead);
++	           PE_slide_devicetree(0);
++	           sweet_early_hex((uint64_t)(uintptr_t)PE_state.deviceTreeHead);
++	   }
++	#endif
+ 
+ 	// From here on out, we're off the bootstrap translation tables.
+ 
+ 
+ 	/* AuxKC initialization has to be deferred until this point, since
