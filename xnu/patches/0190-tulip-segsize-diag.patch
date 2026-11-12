@@ -1,0 +1,23 @@
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -1240,9 +1240,20 @@
+ 	segLOWESTTEXT = UINT64_MAX;
+ 	if (segSizePRELINKTEXT && (segPRELINKTEXTB < segLOWESTTEXT)) {
+ 		segLOWESTTEXT = segPRELINKTEXTB;
+ 	}
++	#if defined(VINCE_TULIP)
++	tulip_early_hex("segSizeTEXT", (uint64_t)segSizeTEXT);
++	tulip_early_hex("segTEXTB", (uint64_t)segTEXTB);
++	tulip_early_hex("segSizePRELINKTEXT", (uint64_t)segSizePRELINKTEXT);
++	tulip_early_hex("segPRELINKTEXTB", (uint64_t)segPRELINKTEXTB);
++	tulip_early_hex("mh_execute", (uint64_t)(uintptr_t)&_mh_execute_header);
++	tulip_early_hex("virtBase", (uint64_t)args->virtBase);
++	tulip_early_hex("physBase", (uint64_t)args->physBase);
++	tulip_early_hex("topOfKernelData", (uint64_t)args->topOfKernelData);
++	#else
+ 	assert(segSizeTEXT);
++	#endif
+ 	if (segTEXTB < segLOWESTTEXT) {
+ 		segLOWESTTEXT = segTEXTB;
+ 	}
+ 	assert(segLOWESTTEXT < UINT64_MAX);
