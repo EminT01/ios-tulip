@@ -153,7 +153,7 @@ const char *loader_boot(uintptr_t dtb)
 	ba->Video.v_width = FB_W;
 	ba->Video.v_height = FB_H;
 	ba->Video.v_depth = FB_BPP;
-	ba->deviceTreeP = adt_pa - pa_of_va_base;
+	ba->deviceTreeP = adt_pa;
 	ba->deviceTreeLength = (uint32_t)p->adt_size;
 	for (int i = 0; i < BOOT_LINE_LENGTH; i++)
 		ba->CommandLine[i] = p->cmdline[i];
