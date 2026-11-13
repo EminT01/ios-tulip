@@ -1,0 +1,56 @@
+--- a/pexpert/arm/pe_serial.c
++++ b/pexpert/arm/pe_serial.c
+@@ -722,6 +722,9 @@
+ static volatile uint8_t *fbcon_base;
+ static uint32_t fbcon_width, fbcon_height, fbcon_stride, fbcon_bpp = 3;   /* bytes per pixel */
+ static uint32_t fbcon_cols, fbcon_rows, fbcon_col, fbcon_row;
++/* tulip: panic aninda ekrani bastan yaz ve dondur (mesaj kaybolmasin) */
++static char fbcon_sniff[10];
++static int fbcon_panic, fbcon_frozen;
+ 
+ static void
+ fbcon_clear_row(uint32_t row)
+@@ -743,6 +746,10 @@
+ fbcon_newline(void)
+ {
+ 	fbcon_col = 0;
++	if (fbcon_panic && (fbcon_row + 1) >= fbcon_rows) {
++		fbcon_frozen = 1;   /* panic ekrani: daha fazla yazma, mesaj kalsin */
++		return;
++	}
+ 	fbcon_row = (fbcon_row + 1) % fbcon_rows;
+ 	fbcon_clear_row(fbcon_row);
+ 	fbcon_clear_row((fbcon_row + 1) % fbcon_rows);
+@@ -768,6 +775,32 @@
+ static void
+ fbcon_transmit_data(uint8_t c)
+ {
++	if (fbcon_frozen) {
++		return;
++	}
++	if (!fbcon_panic) {
++		uint32_t i;
++		for (i = 0; i < 9; i++) {
++			fbcon_sniff[i] = fbcon_sniff[i + 1];
++		}
++		fbcon_sniff[9] = (char)c;
++		if (fbcon_sniff[0] == 'p' && fbcon_sniff[1] == 'a' &&
++		    fbcon_sniff[2] == 'n' && fbcon_sniff[3] == 'i' &&
++		    fbcon_sniff[4] == 'c' && fbcon_sniff[5] == '(' &&
++		    fbcon_sniff[6] == 'c' && fbcon_sniff[7] == 'p' &&
++		    fbcon_sniff[8] == 'u' && fbcon_sniff[9] == ' ') {
++			fbcon_panic = 1;
++			for (i = 0; i < fbcon_rows; i++) {
++				fbcon_clear_row(i);
++			}
++			fbcon_row = 0;
++			fbcon_col = 0;
++			for (i = 0; i < 10; i++) {
++				fbcon_transmit_data((uint8_t)fbcon_sniff[i]);
++			}
++			return;
++		}
++	}
+ 	if (c == '\r') {
+ 		fbcon_col = 0;
+ 		return;
