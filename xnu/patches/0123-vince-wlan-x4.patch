@@ -25,7 +25,7 @@ index 2c41274..b2a91f6 100755
  	static struct va_result ar;
 @@ -503,6 +503,10 @@ vw_connect_test(void)
  	} else {
- 		printf("VINCE WLAN: DHCP lease ip %u.%u.%u.%u gw %u.%u.%u.%u lease %u s\n", c->ip[0], c->ip[1], c->ip[2],
+ 		printf("TULIP WLAN: DHCP lease ip %u.%u.%u.%u gw %u.%u.%u.%u lease %u s\n", c->ip[0], c->ip[1], c->ip[2],
  		    c->ip[3], c->gw[0], c->gw[1], c->gw[2], c->gw[3], c->lease);
 +		if (stage >= 4) {
 +			vif_stack_test(c);
@@ -40,11 +40,11 @@ index 2c41274..b2a91f6 100755
  	}
 +leave:
  	vwpa_stop();
- 	printf("VINCE WLAN: leave %d\n", va_leave(&ap));
- 	printf("VINCE WLAN: X3 done\n");
+ 	printf("TULIP WLAN: leave %d\n", va_leave(&ap));
+ 	printf("TULIP WLAN: X3 done\n");
 @@ -567,7 +572,7 @@ vw_thread(void *arg, wait_result_t w)
  	if (stage >= 2 && vw_scan_all() == 0) {
- 		printf("VINCE WLAN: X2 done\n");
+ 		printf("TULIP WLAN: X2 done\n");
  		if (stage >= 3) {
 -			vw_connect_test();
 +			vw_connect_test(stage);
@@ -220,7 +220,7 @@ index 0000000..8fe5c22
 +	e.broadcast_len = ETHER_ADDR_LEN;
 +	err = ifnet_allocate_extended(&e, &vif_ifp);
 +	if (err) {
-+		printf("VINCE WLAN: ifnet_allocate failed %d\n", err);
++		printf("TULIP WLAN: ifnet_allocate failed %d\n", err);
 +		return err;
 +	}
 +	ifnet_set_capabilities_enabled(vif_ifp, 0, -1);
@@ -232,13 +232,13 @@ index 0000000..8fe5c22
 +	ifnet_set_offload(vif_ifp, 0);
 +	err = ifnet_attach(vif_ifp, NULL);
 +	if (err) {
-+		printf("VINCE WLAN: ifnet_attach failed %d\n", err);
++		printf("TULIP WLAN: ifnet_attach failed %d\n", err);
 +		ifnet_release(vif_ifp);
 +		vif_ifp = NULL;
 +		return err;
 +	}
 +	ifnet_set_lladdr(vif_ifp, mac, ETHER_ADDR_LEN);
-+	printf("VINCE WLAN: %s attached, %02x:%02x:%02x:%02x:%02x:%02x\n", if_name(vif_ifp), mac[0], mac[1], mac[2],
++	printf("TULIP WLAN: %s attached, %02x:%02x:%02x:%02x:%02x:%02x\n", if_name(vif_ifp), mac[0], mac[1], mac[2],
 +	    mac[3], mac[4], mac[5]);
 +	return 0;
 +}
@@ -303,14 +303,14 @@ index 0000000..8fe5c22
 +	ifra.ifra_broadaddr.sin_family = AF_INET;
 +	ifra.ifra_broadaddr.sin_addr.s_addr = ip | ~mask;
 +	err = in_control(NULL, SIOCAIFADDR, (caddr_t)&ifra, vif_ifp, kernproc);
-+	printf("VINCE WLAN: address %u.%u.%u.%u/%u.%u.%u.%u on %s: %d\n", c->ip[0], c->ip[1], c->ip[2], c->ip[3],
++	printf("TULIP WLAN: address %u.%u.%u.%u/%u.%u.%u.%u on %s: %d\n", c->ip[0], c->ip[1], c->ip[2], c->ip[3],
 +	    c->mask[0], c->mask[1], c->mask[2], c->mask[3], if_name(vif_ifp), err);
 +	if (err) {
 +		return err;
 +	}
 +	ifnet_set_flags(vif_ifp, IFF_UP | IFF_RUNNING, IFF_UP | IFF_RUNNING);
 +	err = vif_route_default(c->gw);
-+	printf("VINCE WLAN: default route via %u.%u.%u.%u: %d\n", c->gw[0], c->gw[1], c->gw[2], c->gw[3], err);
++	printf("TULIP WLAN: default route via %u.%u.%u.%u: %d\n", c->gw[0], c->gw[1], c->gw[2], c->gw[3], err);
 +	return 0;
 +}
 +
@@ -449,7 +449,7 @@ index 0000000..8fe5c22
 +		err = sock_socket(PF_INET, SOCK_RAW, IPPROTO_ICMP, NULL, NULL, &so);
 +	}
 +	if (err) {
-+		printf("VINCE WLAN: ICMP socket failed %d\n", err);
++		printf("TULIP WLAN: ICMP socket failed %d\n", err);
 +		goto out;
 +	}
 +	tv.tv_sec = 1;
@@ -487,7 +487,7 @@ index 0000000..8fe5c22
 +		t0 = vd_now_us();
 +		err = sock_send(so, &msg, 0, &sent);
 +		if (err) {
-+			printf("VINCE WLAN: kernel ping %d: send failed %d\n", i, err);
++			printf("TULIP WLAN: kernel ping %d: send failed %d\n", i, err);
 +			fail++;
 +		} else {
 +			int good = 0;
@@ -518,15 +518,15 @@ index 0000000..8fe5c22
 +			}
 +			if (good) {
 +				ok++;
-+				printf("VINCE WLAN: kernel ping %d: reply in %u us\n", i, (uint32_t)(vd_now_us() - t0));
++				printf("TULIP WLAN: kernel ping %d: reply in %u us\n", i, (uint32_t)(vd_now_us() - t0));
 +			} else {
 +				fail++;
-+				printf("VINCE WLAN: kernel ping %d: no reply (%d)\n", i, err);
++				printf("TULIP WLAN: kernel ping %d: no reply (%d)\n", i, err);
 +			}
 +		}
 +		vince_smd_sleep(4000);
 +	}
-+	printf("VINCE WLAN: kernel ping done, %d ok, %d failed\n", ok, fail);
++	printf("TULIP WLAN: kernel ping done, %d ok, %d failed\n", ok, fail);
 +	sock_close(so);
 +out:
 +	(void)thread_terminate(current_thread());
@@ -551,7 +551,7 @@ index 0000000..8fe5c22
 +	}
 +	vif_run(75ULL * 1000000ULL);
 +	if (ifnet_stat(vif_ifp, &st) == 0) {
-+		printf("VINCE WLAN: %s packets in %llu out %llu, errors in %llu out %llu\n", if_name(vif_ifp),
++		printf("TULIP WLAN: %s packets in %llu out %llu, errors in %llu out %llu\n", if_name(vif_ifp),
 +		    (unsigned long long)st.packets_in, (unsigned long long)st.packets_out,
 +		    (unsigned long long)st.errors_in, (unsigned long long)st.errors_out);
 +	}

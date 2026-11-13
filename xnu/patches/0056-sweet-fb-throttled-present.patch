@@ -17,7 +17,7 @@
  
  OSDefineMetaClassAndStructors(AppleCLCD, IOMobileFramebuffer);
 @@ -156,6 +160,9 @@
- 		IOLog("SWEET FB: no vsync timer\n");
+ 		IOLog("TULIP FB: no vsync timer\n");
  		return false;
  	}
 +	uint32_t hz = 10;
@@ -68,7 +68,7 @@
 +	fDirty = true;
 +	IOLockUnlock(fLock);
 +	if ((++sweet_fb_swap_count % 1000) == 0) {
- 		IOLog("SWEET FB: %llu swaps\n", sweet_fb_swap_count);
+ 		IOLog("TULIP FB: %llu swaps\n", sweet_fb_swap_count);
  	}
 +}
 +

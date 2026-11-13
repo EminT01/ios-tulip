@@ -413,28 +413,28 @@ index 0000000..4fb6bd7
 +		vs_sleep(250);
 +	}
 +	if (!vs_find("APPS_RIVA_BT_CMD", &c)) {
-+		printf("VINCE SMD: no APPS_RIVA_BT_CMD channel (Pronto not started by the shim?)\n");
++		printf("TULIP SMD: no APPS_RIVA_BT_CMD channel (Pronto not started by the shim?)\n");
 +		goto out;
 +	}
-+	printf("VINCE SMD: BT_CMD info %#lx fifo %#lx half %#x remote state %u\n",
++	printf("TULIP SMD: BT_CMD info %#lx fifo %#lx half %#x remote state %u\n",
 +	    (unsigned long)(c.info - smem), (unsigned long)(c.fifo - smem), c.half, rd32(c.info + I_HALF + I_STATE));
 +	r = vs_open(&c);
 +	if (r) {
-+		printf("VINCE SMD: open BT_CMD failed %d (tx %u rx %u)\n", r, rd32(c.info + I_STATE),
++		printf("TULIP SMD: open BT_CMD failed %d (tx %u rx %u)\n", r, rd32(c.info + I_STATE),
 +		    rd32(c.info + I_HALF + I_STATE));
 +		goto out;
 +	}
-+	printf("VINCE SMD: BT_CMD open (tx %u rx %u)\n", rd32(c.info + I_STATE), rd32(c.info + I_HALF + I_STATE));
++	printf("TULIP SMD: BT_CMD open (tx %u rx %u)\n", rd32(c.info + I_STATE), rd32(c.info + I_HALF + I_STATE));
 +	r = vs_send(&c, req, sizeof(req));
 +	if (r) {
-+		printf("VINCE SMD: HCI Reset not sent %d\n", r);
++		printf("TULIP SMD: HCI Reset not sent %d\n", r);
 +		goto out;
 +	}
 +	r = vs_recv(&c, buf, sizeof(buf), 3000);
 +	if (r == 6 && buf[0] == 0x0e && buf[3] == 0x03 && buf[4] == 0x0c) {      /* Command Complete for opcode 0x0c03 */
-+		printf("VINCE SMD: HCI Reset answered, status %u\n", buf[5]);
++		printf("TULIP SMD: HCI Reset answered, status %u\n", buf[5]);
 +	} else {
-+		printf("VINCE SMD: HCI answer r=%d bytes %02x %02x %02x %02x %02x %02x\n", r, buf[0], buf[1], buf[2],
++		printf("TULIP SMD: HCI answer r=%d bytes %02x %02x %02x %02x %02x %02x\n", r, buf[0], buf[1], buf[2],
 +		    buf[3], buf[4], buf[5]);
 +	}
 +out:
@@ -459,13 +459,13 @@ index 0000000..4fb6bd7
 +	smem = ml_io_map(SMEM_PA, SMEM_SIZE);
 +	apcs = ml_io_map(APCS_PA, 0x1000);
 +	if (!smem || !apcs) {
-+		printf("VINCE SMD: mapping failed\n");
++		printf("TULIP SMD: mapping failed\n");
 +		return;
 +	}
 +	if (kernel_thread_start(smd_thread, NULL, &thread) == KERN_SUCCESS) {
 +		thread_deallocate(thread);
 +	} else {
-+		printf("VINCE SMD: thread not started\n");
++		printf("TULIP SMD: thread not started\n");
 +	}
 +}
 +#endif /* ARM64_BOARD_CONFIG_VINCE */

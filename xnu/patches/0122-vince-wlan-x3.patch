@@ -5141,7 +5141,7 @@ index b5c57a4..2c41274 100755
 +static void
 +vw_log_assoc(const struct va_result *r)
 +{
-+	printf("VINCE WLAN: assoc step %d (%s) err %d auth %u assoc %u aid %u; us after the answer: post-assoc request %u, all HAL steps %u\n",
++	printf("TULIP WLAN: assoc step %d (%s) err %d auth %u assoc %u aid %u; us after the answer: post-assoc request %u, all HAL steps %u\n",
 +	    r->step, va_step_name(r->step), r->err, r->auth_status, r->assoc_status, r->aid,
 +	    (uint32_t)(r->t_post_sent_us - r->t_assoc_resp_us), (uint32_t)(r->t_done_us - r->t_assoc_resp_us));
 +}
@@ -5160,7 +5160,7 @@ index b5c57a4..2c41274 100755
 +	int r;
 +
 +	if (!PE_parse_boot_argn("vincessid", ssid, sizeof(ssid)) || !PE_parse_boot_argn("vincepass", pass, sizeof(pass))) {
-+		printf("VINCE WLAN: vincessid / vincepass boot-args missing, stopping after the scan\n");
++		printf("TULIP WLAN: vincessid / vincepass boot-args missing, stopping after the scan\n");
 +		return;
 +	}
 +	vw_unscore(ssid);
@@ -5173,22 +5173,22 @@ index b5c57a4..2c41274 100755
 +		}
 +	}
 +	if (!hit) {
-+		printf("VINCE WLAN: \"%s\" is not in the scan table\n", ssid);
++		printf("TULIP WLAN: \"%s\" is not in the scan table\n", ssid);
 +		return;
 +	}
 +	ap = *hit;
-+	printf("VINCE WLAN: connecting to \"%s\" %02x:%02x:%02x:%02x:%02x:%02x ch %u\n", ap.ssid, ap.bssid[0], ap.bssid[1],
++	printf("TULIP WLAN: connecting to \"%s\" %02x:%02x:%02x:%02x:%02x:%02x ch %u\n", ap.ssid, ap.bssid[0], ap.bssid[1],
 +	    ap.bssid[2], ap.bssid[3], ap.bssid[4], ap.bssid[5], ap.ch);
 +	va_use_rsn(1);
 +	r = va_connect(&ap, &ar);
 +	va_use_rsn(0);
 +	vw_log_assoc(&ar);
 +	if (r) {
-+		printf("VINCE WLAN: association FAILED\n");
++		printf("TULIP WLAN: association FAILED\n");
 +		return;
 +	}
 +	r = vwpa_handshake(&ap, pass, pl, &wr);
-+	printf("VINCE WLAN: handshake %s at step %d (%s) err %d, pmk %u ms, gtk id %u\n", r ? "FAILED" : "done", wr.step,
++	printf("TULIP WLAN: handshake %s at step %d (%s) err %d, pmk %u ms, gtk id %u\n", r ? "FAILED" : "done", wr.step,
 +	    vwpa_step_name(wr.step), wr.err, wr.pmk_ms, wr.gtk_id);
 +	bzero(pass, sizeof(pass));
 +	if (r) {
@@ -5197,9 +5197,9 @@ index b5c57a4..2c41274 100755
 +	r = vn_dhcp();
 +	c = vn_get_cfg();
 +	if (r) {
-+		printf("VINCE WLAN: DHCP failed, step %d (offers %u acks %u)\n", r, c->offers, c->acks);
++		printf("TULIP WLAN: DHCP failed, step %d (offers %u acks %u)\n", r, c->offers, c->acks);
 +	} else {
-+		printf("VINCE WLAN: DHCP lease ip %u.%u.%u.%u gw %u.%u.%u.%u lease %u s\n", c->ip[0], c->ip[1], c->ip[2],
++		printf("TULIP WLAN: DHCP lease ip %u.%u.%u.%u gw %u.%u.%u.%u lease %u s\n", c->ip[0], c->ip[1], c->ip[2],
 +		    c->ip[3], c->gw[0], c->gw[1], c->gw[2], c->gw[3], c->lease);
 +		/* link upkeep: a ping to the gateway every 5 s for a minute; ARP / echo / group rekeys are answered inside */
 +		for (int i = 0; i < 12; i++) {
@@ -5208,7 +5208,7 @@ index b5c57a4..2c41274 100755
 +			uint64_t until;
 +
 +			r = vn_ping(c->gw, &rtt);
-+			printf("VINCE WLAN: ping %d: %s", i, r ? "no reply" : "reply");
++			printf("TULIP WLAN: ping %d: %s", i, r ? "no reply" : "reply");
 +			if (!r) {
 +				printf(" %u us", rtt);
 +			}
@@ -5223,17 +5223,17 @@ index b5c57a4..2c41274 100755
 +		}
 +	}
 +	vwpa_stop();
-+	printf("VINCE WLAN: leave %d\n", va_leave(&ap));
-+	printf("VINCE WLAN: X3 done\n");
++	printf("TULIP WLAN: leave %d\n", va_leave(&ap));
++	printf("TULIP WLAN: X3 done\n");
 +}
 +
  static void
  vw_thread(void *arg, wait_result_t w)
  {
 @@ -445,6 +566,9 @@ vw_thread(void *arg, wait_result_t w)
- 	printf("VINCE WLAN: X1 done, HAL is up\n");
+ 	printf("TULIP WLAN: X1 done, HAL is up\n");
  	if (stage >= 2 && vw_scan_all() == 0) {
- 		printf("VINCE WLAN: X2 done\n");
+ 		printf("TULIP WLAN: X2 done\n");
 +		if (stage >= 3) {
 +			vw_connect_test();
 +		}

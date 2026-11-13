@@ -15,7 +15,7 @@ diff --git a/bsd/kern/kern_trustcache.c b/bsd/kern/kern_trustcache.c
 +	if (img4if == NULL || amfi == NULL) {
 +		trust_cache_rt = NULL;
 +		trust_cache_mut_rt = NULL;
-+		printf("SWEET: trust caches unavailable (Image4/AMFI not installed)\n");
++		printf("TULIP: trust caches unavailable (Image4/AMFI not installed)\n");
 +		return;
 +	}
 +#endif

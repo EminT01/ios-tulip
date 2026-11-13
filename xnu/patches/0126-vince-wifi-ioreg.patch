@@ -11,7 +11,7 @@ index fc1bd04..3513764 100755
  
  #define HAL_START_REQ           0
 @@ -857,6 +858,21 @@ vw_station(int stage)
- 	printf("VINCE WLAN: station done after %d reconnect cycles, %d Pronto restarts\n", cycles, restarts);
+ 	printf("TULIP WLAN: station done after %d reconnect cycles, %d Pronto restarts\n", cycles, restarts);
  }
  
 +/* boot-arg vinceui=1: show the radio to iOS userland (en0 as a down interface, the IORegistry objects wifid waits for) */
@@ -25,7 +25,7 @@ index fc1bd04..3513764 100755
 +		return;
 +	}
 +	if (vif_attach(vw_mac) == 0) {
-+		printf("VINCE WLAN: IORegistry publish: %d\n", vince_wlan_iokit_publish(vw_mac, "en0"));
++		printf("TULIP WLAN: IORegistry publish: %d\n", vince_wlan_iokit_publish(vw_mac, "en0"));
 +	}
 +}
 +
@@ -35,7 +35,7 @@ index fc1bd04..3513764 100755
 @@ -866,6 +882,7 @@ vw_thread(void *arg, wait_result_t w)
  	(void)PE_parse_boot_argn("vincewlan", &stage, sizeof(stage));
  	if (vw_bringup(stage) == 0 && stage >= 2 && vw_scan_all() == 0) {
- 		printf("VINCE WLAN: X2 done\n");
+ 		printf("TULIP WLAN: X2 done\n");
 +		vw_publish_ui();
  		if (stage >= 5) {
  			vw_station(stage);
@@ -220,7 +220,7 @@ index b0c97c4..4455ff0 100755
 +
 +			*seen |= bit;
 +			proc_selfname(nm, sizeof(nm));
-+			printf("VINCE A80211: %s type %u val %u len %u by %s -> %d (cmd %#lx)\n", get ? "get" : "set", rq->type,
++			printf("TULIP A80211: %s type %u val %u len %u by %s -> %d (cmd %#lx)\n", get ? "get" : "set", rq->type,
 +			    rq->val, rq->len, nm, err, cmd);
 +		}
 +	}
@@ -248,7 +248,7 @@ index b0c97c4..4455ff0 100755
 +
 +			if (unk < 60) {
 +				unk++;
-+				printf("VINCE A80211: unknown ioctl %#lx\n", cmd);
++				printf("TULIP A80211: unknown ioctl %#lx\n", cmd);
 +			}
 +		}
  		return EOPNOTSUPP;
@@ -281,7 +281,7 @@ index 0000000..b737d86
 + * are defined here. They carry no data path: the packets go through the BSD ifnet (bsd/dev/vince_wlan_if.c), the
 + * Apple80211 requests arrive as socket ioctls on that ifnet.
 + *
-+ * Property reads on these objects are logged ("VINCE IO: ...") so that what userland asks for can be seen.
++ * Property reads on these objects are logged ("TULIP IO: ...") so that what userland asks for can be seen.
 + */
 +#include <pexpert/arm64/board_config.h>
 +
@@ -308,7 +308,7 @@ index 0000000..b737d86
 +	}
 +	vince_io_logged++;
 +	proc_selfname(name, sizeof(name));
-+	IOLog("VINCE IO: %s %s \"%s\" by %s\n", cls, op, key ? key : "?", name);
++	IOLog("TULIP IO: %s %s \"%s\" by %s\n", cls, op, key ? key : "?", name);
 +}
 +
 +/* ---- the controller side: IONetworkController -> IOEthernetController -> IO80211Controller -> VinceWLANController ---- */
@@ -438,7 +438,7 @@ index 0000000..b737d86
 +	if (n < 100) {
 +		n++;
 +		proc_selfname(name, sizeof(name));
-+		IOLog("VINCE IO: IO80211APIUserClient selector %u by %s, in %u/%u out %u/%u\n", selector, name,
++		IOLog("TULIP IO: IO80211APIUserClient selector %u by %s, in %u/%u out %u/%u\n", selector, name,
 +		    args->scalarInputCount, args->structureInputSize, args->scalarOutputCount, args->structureOutputSize);
 +	}
 +	for (uint32_t i = 0; i < args->scalarOutputCount; i++) {
@@ -515,7 +515,7 @@ index 0000000..b737d86
 +		return -4;
 +	}
 +	vince_ifc->registerService();
-+	IOLog("VINCE IO: IO80211SkywalkInterface %s registered\n", bsd_name);
++	IOLog("TULIP IO: IO80211SkywalkInterface %s registered\n", bsd_name);
 +	return 0;
 +}
 +#endif /* ARM64_BOARD_CONFIG_VINCE */

@@ -27,7 +27,7 @@ index e703342..a208f61 100755
  vui_take(struct vui_assoc *a)
 @@ -1101,6 +1110,7 @@ vui_assoc(const struct vui_assoc *a, int stage)
  	if (!hit) {
- 		printf("VINCE UI: network not found\n");
+ 		printf("TULIP UI: network not found\n");
  		vui_set_state(VUI_S_INIT);
 +		vui_set_result(9);
  		res[0] = 9;                                     /* APPLE80211_RESULT_TIMEOUT */

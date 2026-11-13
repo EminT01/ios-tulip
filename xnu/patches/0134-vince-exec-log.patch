@@ -8,7 +8,7 @@ index bfc495b..c096d64 100644
  	error = exec_activate_image(imgp);
 +#if defined(ARM64_BOARD_CONFIG_VINCE)
 +	if (error != 0) {
-+		printf("VINCE exec failed %d for \"%.60s\"\n", error, imgp->ip_startargv ? imgp->ip_startargv : "?");
++		printf("TULIP exec failed %d for \"%.60s\"\n", error, imgp->ip_startargv ? imgp->ip_startargv : "?");
 +	}
 +#endif
  #if defined(HAS_APPLE_PAC)

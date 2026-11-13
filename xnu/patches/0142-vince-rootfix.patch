@@ -100,7 +100,7 @@ index 0000000..5ff8aa4
 +	}
 +	e1 = vf_write("/usr/libexec/vince-bluetool", vince_bluetool_bin, vince_bluetool_bin_len, 0755);
 +	e2 = vf_write("/System/Library/LaunchDaemons/com.apple.BlueTool.plist", vince_bluetool_plist, vince_bluetool_plist_len, 0644);
-+	printf("VINCE ROOTFIX: BlueTool stand-in %d, job file %d\n", e1, e2);
++	printf("TULIP ROOTFIX: BlueTool stand-in %d, job file %d\n", e1, e2);
 +}
 +#endif /* ARM64_BOARD_CONFIG_VINCE */
 diff --git a/bsd/dev/vince_userland_data.h b/bsd/dev/vince_userland_data.h

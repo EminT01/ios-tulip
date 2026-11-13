@@ -52,8 +52,8 @@
  	if (!touch_clocks() || !touch_se_init()) {
  		goto out;
  	}
--	printf("SWEET TOUCH: TLMM reset=%#x irq=%#x vdd90=%#x; L11C must be powered by firmware\n",
-+	printf("SWEET TOUCH: TLMM reset=%#x irq=%#x vdd90=%#x; voting L11C through RPMh\n",
+-	printf("TULIP TOUCH: TLMM reset=%#x irq=%#x vdd90=%#x; L11C must be powered by firmware\n",
++	printf("TULIP TOUCH: TLMM reset=%#x irq=%#x vdd90=%#x; voting L11C through RPMh\n",
  	    touch_rd(st.gpio, TOUCH_GPIO_IO(8)), touch_rd(st.gpio, TOUCH_GPIO_IO(9)),
  	    touch_rd(st.gpio, TOUCH_GPIO_IO(90)));
 -	touch_gpio(6, 1, 0, 0, false); /* qup11 SDA/SCL, 2 mA, no internal pull */
@@ -68,7 +68,7 @@
 +	touch_gpio(8, 0, 3, 3, true, false);
 +	int power_error = sweet_rpmh_vreg_enable("ldoc11", 3200);
 +	if (power_error) {
-+		printf("SWEET TOUCH: L11C RPMh enable failed %d; probes skipped\n", power_error);
++		printf("TULIP TOUCH: L11C RPMh enable failed %d; probes skipped\n", power_error);
 +		goto out;
 +	}
 +	touch_gpio(90, 0, 0, 0, true, true); /* board digital power enable */
@@ -82,7 +82,7 @@
 +	touch_wait(300); /* exceeds vendor 5 ms test + 95 ms post-test wait */
  	uint8_t gid[12] = {0}, fid1 = 0, fid2 = 0;
  	int ge = touch_read(0x5d, 0x4022, true, gid, sizeof(gid));
- 	printf("SWEET TOUCH: probe 0x5d err=%d pid=%02x%02x%02x%02x fw=%02x.%02x.%02x.%02x irq=%#x\n",
+ 	printf("TULIP TOUCH: probe 0x5d err=%d pid=%02x%02x%02x%02x fw=%02x.%02x.%02x.%02x irq=%#x\n",
 --- a/iokit/conf/files.arm64
 +++ b/iokit/conf/files.arm64
 @@ -15,7 +15,8 @@
@@ -190,7 +190,7 @@
 +		}
 +		delay(1);
 +	}
-+	printf("SWEET RPMH: readback timeout off=%#x want=%#x got=%#x\n",
++	printf("TULIP RPMH: readback timeout off=%#x want=%#x got=%#x\n",
 +	    off, value, rh_read(rh_tcs, off));
 +	return false;
 +}
@@ -222,7 +222,7 @@
 +		rh_dict = ml_io_map(RH_DICT_PA, 8);
 +	}
 +	if (!rh_rsc || !rh_tcs || !rh_dict) {
-+		printf("SWEET RPMH: RSC/locator mapping failed\n");
++		printf("TULIP RPMH: RSC/locator mapping failed\n");
 +		return ENOMEM;
 +	}
 +	uint32_t id = rh_read(rh_rsc, 0);
@@ -231,24 +231,24 @@
 +	unsigned major = (id >> 16) & 0xffu;
 +	unsigned count = (config >> (6u * RH_DRV)) & 0x3fu;
 +	rh_ncpt = (config >> 27) & 0x1fu;
-+	printf("SWEET RPMH: rsc=%#x tcs=%#x DRV=%u id=%#x solver=%#x config=%#x TCS=%u ncpt=%u\n",
++	printf("TULIP RPMH: rsc=%#x tcs=%#x DRV=%u id=%#x solver=%#x config=%#x TCS=%u ncpt=%u\n",
 +	    RH_RSC_PA, RH_TCS_PA, RH_DRV, id, solver, config, count, rh_ncpt);
 +	/* This client implements the pre-v3 layout only; do not guess v3 offsets. */
 +	if ((major != 1 && major != 2) || config == 0xffffffffu ||
 +	    solver == 0xffffffffu || count < RH_NORMAL_N ||
 +	    count > RH_TCS_SIZE / RH_TCS_STRIDE || rh_ncpt < 3 || rh_ncpt > 16) {
-+		printf("SWEET RPMH: unsupported RSC geometry/revision\n");
++		printf("TULIP RPMH: unsupported RSC geometry/revision\n");
 +		return ENODEV;
 +	}
 +	if (!rh_db) {
 +		uint32_t pa = rh_read(rh_dict, 0);
 +		uint32_t size = rh_read(rh_dict, 4);
-+		printf("SWEET RPMH: cmd-db locator=%#x pa=%#x size=%#x\n", RH_DICT_PA, pa, size);
++		printf("TULIP RPMH: cmd-db locator=%#x pa=%#x size=%#x\n", RH_DICT_PA, pa, size);
 +		/* Firmware supplies the reserved RAM address; never scan physical RAM. */
 +		if (pa < 0x80000000u || (pa & 3u) || (size & 3u) ||
 +		    size < RH_DB_HEADER || size > RH_DB_MAX ||
 +		    (uint64_t)pa + size > 0x100000000ULL) {
-+			printf("SWEET RPMH: invalid cmd-db locator\n");
++			printf("TULIP RPMH: invalid cmd-db locator\n");
 +			return EINVAL;
 +		}
 +		rh_db = ml_io_map(pa, size);
@@ -260,11 +260,11 @@
 +	uint32_t db_version = rh_read(rh_db, 0);
 +	uint32_t magic = rh_read(rh_db, 4);
 +	uint32_t flags = rh_read(rh_db, 140);
-+	printf("SWEET RPMH: cmd-db version=%#x magic=%#x checksum=%#x flags=%#x\n",
++	printf("TULIP RPMH: cmd-db version=%#x magic=%#x checksum=%#x flags=%#x\n",
 +	    db_version, magic, rh_read(rh_db, 136), flags);
 +	/* Linux only checks magic; version 1 is an intentionally stricter policy. */
 +	if (magic != RH_DB_MAGIC || db_version != 1 || (flags & 1u)) {
-+		printf("SWEET RPMH: unsupported/standalone cmd-db\n");
++		printf("TULIP RPMH: unsupported/standalone cmd-db\n");
 +		return EINVAL;
 +	}
 +	return 0;
@@ -289,7 +289,7 @@
 +		unsigned count = rh_db16(h + 6);
 +		if (slave < 3 || slave > 5 || (entries & 3u) ||
 +		    !rh_range(entries, count * RH_DB_ENTRY) || !rh_range(aux, 0)) {
-+			printf("SWEET RPMH: malformed cmd-db slave header %u\n", i);
++			printf("TULIP RPMH: malformed cmd-db slave header %u\n", i);
 +			return EINVAL;
 +		}
 +		for (unsigned j = 0; j < count; ++j) {
@@ -300,18 +300,18 @@
 +			uint32_t addr = rh_read(rh_db, e + 16);
 +			if (slave != RH_VRM || (addr >> 16) != RH_VRM || (addr & 15u) ||
 +			    !rh_range(aux + rh_db16(e + 22), rh_db16(e + 20))) {
-+				printf("SWEET RPMH: invalid VRM entry for %s\n", res);
++				printf("TULIP RPMH: invalid VRM entry for %s\n", res);
 +				return EINVAL;
 +			}
 +			*address = addr;
 +			++matches;
-+			printf("SWEET RPMH: %s addr=%#x slave=%u aux-version=%#x priority=%#x:%#x\n",
++			printf("TULIP RPMH: %s addr=%#x slave=%u aux-version=%#x priority=%#x:%#x\n",
 +			    res, addr, slave, rh_db16(h + 8),
 +			    rh_read(rh_db, e + 8), rh_read(rh_db, e + 12));
 +		}
 +	}
 +	if (matches != 1) {
-+		printf("SWEET RPMH: %s lookup matches=%u; refusing\n", res, matches);
++		printf("TULIP RPMH: %s lookup matches=%u; refusing\n", res, matches);
 +		return ENODEV;
 +	}
 +	return 0;
@@ -337,7 +337,7 @@
 +	for (unsigned t = 0; t < RH_ACTIVE_N; ++t) {
 +		uint32_t b = t * RH_TCS_STRIDE;
 +		uint32_t enabled = rh_read(rh_tcs, b + RH_ENABLE);
-+		printf("SWEET RPMH: ACTIVE TCS%u idle=%#x control=%#x enable=%#x wait=%#x\n",
++		printf("TULIP RPMH: ACTIVE TCS%u idle=%#x control=%#x enable=%#x wait=%#x\n",
 +		    t, rh_read(rh_tcs, b + RH_STATUS), rh_read(rh_tcs, b + RH_CONTROL),
 +		    enabled, rh_read(rh_tcs, b + RH_WAIT));
 +		if (enabled & ~((1u << rh_ncpt) - 1u)) {
@@ -346,7 +346,7 @@
 +		for (unsigned c = 0; c < rh_ncpt; ++c) {
 +			if ((enabled & (1u << c)) &&
 +			    (rh_read(rh_tcs, b + RH_ADDR + c * RH_CMD_STRIDE) & ~15u) == address) {
-+				printf("SWEET RPMH: conflicting inherited L11C request in TCS%u\n", t);
++				printf("TULIP RPMH: conflicting inherited L11C request in TCS%u\n", t);
 +				return EBUSY;
 +			}
 +		}
@@ -355,7 +355,7 @@
 +		}
 +	}
 +	if (chosen < 0) {
-+		printf("SWEET RPMH: no empty idle ACTIVE TCS; leaving inherited state intact\n");
++		printf("TULIP RPMH: no empty idle ACTIVE TCS; leaving inherited state intact\n");
 +		return EBUSY;
 +	}
 +	unsigned t = (unsigned)chosen;
@@ -381,7 +381,7 @@
 +	/* HPM (raw 7) is supported by this PMIC5 LDO; enable comes last. */
 +	const uint32_t offsets[3] = {0, 8, 4};
 +	const uint32_t values[3] = {mv, 7, 1};
-+	printf("SWEET RPMH: TCS%u ACTIVE %u mV mode=7 enable=1 irq-enable=%#x\n", t, mv, irq_en);
++	printf("TULIP RPMH: TCS%u ACTIVE %u mV mode=7 enable=1 irq-enable=%#x\n", t, mv, irq_en);
 +	for (unsigned c = 0; c < 3; ++c) {
 +		uint32_t cmd = b + c * RH_CMD_STRIDE;
 +		if (!rh_sync(cmd + RH_MSGID, RH_WRITE_ACK) ||
@@ -415,10 +415,10 @@
 +		}
 +		delay(1);
 +	}
-+	printf("SWEET RPMH: TCS%u done=%d irq=%#x idle=%#x control=%#x cmd-status=%#x/%#x/%#x\n",
++	printf("TULIP RPMH: TCS%u done=%d irq=%#x idle=%#x control=%#x cmd-status=%#x/%#x/%#x\n",
 +	    t, done, irq, idle, rh_read(rh_tcs, b + RH_CONTROL), status[0], status[1], status[2]);
 +	if (!done) {
-+		printf("SWEET RPMH: timeout; TCS quarantined, IRQ remains masked; no reset/retry\n");
++		printf("TULIP RPMH: timeout; TCS quarantined, IRQ remains masked; no reset/retry\n");
 +		return ETIMEDOUT;
 +	}
 +	/* Proven completion: clear trigger before mode, then free only our commands. */
@@ -432,7 +432,7 @@
 +		return EIO;
 +	}
 +	rh_poisoned = false;
-+	printf("SWEET RPMH: L11C ACTIVE vote complete (rail voltage requires hardware verification)\n");
++	printf("TULIP RPMH: L11C ACTIVE vote complete (rail voltage requires hardware verification)\n");
 +	return 0;
 +}
 +
@@ -441,7 +441,7 @@
 +{
 +	/* Board-specific helper: do not apply PMIC5-LDO policy to arbitrary resources. */
 +	if (!res || strcmp(res, "ldoc11") || mv < 2950 || mv > 3400) {
-+		printf("SWEET RPMH: expected ldoc11 and 2950..3400 mV\n");
++		printf("TULIP RPMH: expected ldoc11 and 2950..3400 mV\n");
 +		return EINVAL;
 +	}
 +	if (__atomic_exchange_n(&rh_lock, 1, __ATOMIC_ACQUIRE)) {
@@ -450,7 +450,7 @@
 +	int error = EIO;
 +	uint32_t address = 0;
 +	if (rh_poisoned) {
-+		printf("SWEET RPMH: previous uncertain transaction; refusing further access\n");
++		printf("TULIP RPMH: previous uncertain transaction; refusing further access\n");
 +		goto out;
 +	}
 +	error = rh_map();
@@ -462,7 +462,7 @@
 +	}
 +out:
 +	if (error) {
-+		printf("SWEET RPMH: enable failed errno=%d\n", error);
++		printf("TULIP RPMH: enable failed errno=%d\n", error);
 +	}
 +	__atomic_store_n(&rh_lock, 0, __ATOMIC_RELEASE);
 +	return error;
@@ -539,19 +539,19 @@
 +	sp_cfg = ml_io_map(SP_CFG_PA, 0x1000);
 +	sp_obs = ml_io_map(SP_OBS_PA, 0x10000); /* EE 0, 512 * 0x80 */
 +	if (!sp_core || !sp_cfg || !sp_obs) {
-+		printf("SWEET BATTERY: SPMI mapping failed\n");
++		printf("TULIP BATTERY: SPMI mapping failed\n");
 +		return -1;
 +	}
 +	uint32_t arb_version = sp_rd(sp_core, 0);
 +	sp_count = sp_rd(sp_core, 4) & 0x7ffu;
 +	if (arb_version < 0x50000000u || arb_version >= 0x70000000u ||
 +	    !sp_count || sp_count > 512) {
-+		printf("SWEET BATTERY: unsupported SPMI arb=%#x APIDs=%u\n",
++		printf("TULIP BATTERY: unsupported SPMI arb=%#x APIDs=%u\n",
 +		    arb_version, sp_count);
 +		return -1;
 +	}
 +	sp_ready = true;
-+	printf("SWEET BATTERY: SPMI arb=%#x APIDs=%u, observer reads only\n",
++	printf("TULIP BATTERY: SPMI arb=%#x APIDs=%u, observer reads only\n",
 +	    arb_version, sp_count);
 +	return 0;
 +}
@@ -591,7 +591,7 @@
 +		delay(1);
 +	}
 +	sp_poisoned[apid] = true;
-+	printf("SWEET BATTERY: SPMI timeout sid=%u addr=%#x APID=%u disabled\n",
++	printf("TULIP BATTERY: SPMI timeout sid=%u addr=%#x APID=%u disabled\n",
 +	    sid, addr, apid);
 +	IOLockUnlock(sp_lock);
 +	return -1;
@@ -772,7 +772,7 @@
 +	updateStatus(); /* Flush PS properties and send 0xe0024100 on change. */
 +	int mode = measured ? 1 : 0;
 +	if (mode != fLastMode) {
-+		IOLog("SWEET BATTERY: %s, %u%% %umV external=%d charging=%d\n",
++		IOLog("TULIP BATTERY: %s, %u%% %umV external=%d charging=%d\n",
 +		    measured ? "PM6150 / estimated SOC" : "static fallback",
 +		    percent, mv, external, charging);
 +		fLastMode = mode;
@@ -896,7 +896,7 @@
 +		} else {
 +			fReal = false;
 +			poll();
-+			IOLog("SWEET BATTERY: timer unavailable; static fallback\n");
++			IOLog("TULIP BATTERY: timer unavailable; static fallback\n");
 +		}
 +	}
 +	registerService();

@@ -16,7 +16,7 @@
 +			    (const uint8_t *)&SIN(info.rti_info[RTAX_GATEWAY])->sin_addr : NULL;
 +			char pname[20];
 +			proc_selfname(pname, sizeof(pname));
-+			printf("SWEET NET: %s route %s %u.%u.%u.%u gw %u.%u.%u.%u ifindex %u flags 0x%x\n", pname,
++			printf("TULIP NET: %s route %s %u.%u.%u.%u gw %u.%u.%u.%u ifindex %u flags 0x%x\n", pname,
 +			    rtm->rtm_type == RTM_ADD ? "add" : rtm->rtm_type == RTM_DELETE ? "delete" : "change",
 +			    d[0], d[1], d[2], d[3], g ? g[0] : 0, g ? g[1] : 0, g ? g[2] : 0, g ? g[3] : 0,
 +			    rtm->rtm_index, rtm->rtm_flags);
@@ -40,7 +40,7 @@
 +			const uint8_t *a = (const uint8_t *)&((struct in_aliasreq *)(void *)data)->ifra_addr.sin_addr;
 +			char pname[20];
 +			proc_name(proc_pid(p), pname, sizeof(pname));
-+			printf("SWEET NET: %s %s %s %u.%u.%u.%u\n", pname, if_name(ifp),
++			printf("TULIP NET: %s %s %s %u.%u.%u.%u\n", pname, if_name(ifp),
 +			    cmd == SIOCAIFADDR ? "add address" : "delete address", a[0], a[1], a[2], a[3]);
 +		}
 +	}

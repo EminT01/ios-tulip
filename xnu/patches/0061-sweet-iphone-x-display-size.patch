@@ -29,7 +29,7 @@
  	IOMemoryMap  *fMap;
  	SweetSurface *fSurface;         /* the panel memory as an IOSurface */
 @@ -144,6 +156,16 @@
- 		IOLog("SWEET FB: no boot framebuffer\n");
+ 		IOLog("TULIP FB: no boot framebuffer\n");
  		return false;
  	}
 +	int native = 0;
@@ -49,9 +49,9 @@
  	setProperty("external", false);
  	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
  	registerService();
--	IOLog("SWEET FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u\n",
+-	IOLog("TULIP FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u\n",
 -	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id);
-+	IOLog("SWEET FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u\n",
++	IOLog("TULIP FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u\n",
 +	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id, fLogicalW, fLogicalH);
  	return true;
  }

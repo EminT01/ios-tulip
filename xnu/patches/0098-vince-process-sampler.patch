@@ -13,7 +13,7 @@ index e4d18e7..3bc55b0 100644
  #define GCC_SDCC1_PHYS  0x01842000ul    /* SDCC1 BCR, then the apps RCG at +4 */
 @@ -827,6 +829,7 @@ vince_mmc_init(void)
  	vm.ready = true;
- 	printf("VINCE MMC: \"%s\" at sector 0x%llx, %llu MiB, %s, %s (8-bit HS 50 MHz, PIO)\n",
+ 	printf("TULIP MMC: \"%s\" at sector 0x%llx, %llu MiB, %s, %s (8-bit HS 50 MHz, PIO)\n",
  	    want, vm.first, vm.nsect * SECTOR >> 20, fs, vm.rw ? "read-write" : "read-only");
 +	sweet_sample_start();
  	return 0;

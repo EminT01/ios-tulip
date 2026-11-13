@@ -60,12 +60,12 @@ new file mode 100644
 +bool
 +SweetPlatformExpert::start(IOService *provider)
 +{
-+	IOLog("SWEET: starting device-tree platform expert\n");
++	IOLog("TULIP: starting device-tree platform expert\n");
 +	if (!IODTPlatformExpert::start(provider)) {
 +		return false;
 +	}
 +	registerService();
-+	IOLog("SWEET: platform expert registered\n");
++	IOLog("TULIP: platform expert registered\n");
 +	return true;
 +}
 +

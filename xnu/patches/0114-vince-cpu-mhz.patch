@@ -36,8 +36,8 @@ index b985d94..7e8cd48 100644
  	cpusRunning();
  	IOService::publishResource(gIOAllCPUInitializedKey, kOSBooleanTrue);
  	ml_set_max_cpus(topology->max_cpu_id + 1);
--	IOLog("SWEET CPU: %u CPUs, initialization complete\n", topology->num_cpus);
-+	IOLog("SWEET CPU: %u CPUs, initialization complete; MHz %u %u %u %u %u %u %u %u\n", topology->num_cpus,
+-	IOLog("TULIP CPU: %u CPUs, initialization complete\n", topology->num_cpus);
++	IOLog("TULIP CPU: %u CPUs, initialization complete; MHz %u %u %u %u %u %u %u %u\n", topology->num_cpus,
 +	    gVinceMHz[0], gVinceMHz[1], gVinceMHz[2], gVinceMHz[3], gVinceMHz[4], gVinceMHz[5], gVinceMHz[6],
 +	    gVinceMHz[7]);
  }

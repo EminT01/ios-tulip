@@ -1059,7 +1059,7 @@ index f7babc3..336b767 100644
 +		if (!vince_gicc_base) {
 +			vince_gicc_base = ml_io_map(MSM8953_GICC_BASE, 0x1000);
 +		}
-+		kprintf("VINCE GICv2: GICD=%p GICC=%p vtimer INTID %u\n",
++		kprintf("TULIP GICv2: GICD=%p GICC=%p vtimer INTID %u\n",
 +		    (void *)vince_gicd_base, (void *)vince_gicc_base, vince_vtimer_intid);
  	}
  

@@ -47,7 +47,7 @@ index a62416c..6fe9eaa 100644
 +	}
 +#endif
  	if (fPhys == 0 || fWidth == 0 || fHeight == 0 || fRowBytes < fWidth * 4) {
- 		IOLog("SWEET FB: no boot framebuffer\n");
+ 		IOLog("TULIP FB: no boot framebuffer\n");
  		return false;
 @@ -178,6 +202,11 @@ AppleCLCD::start(IOService *provider)
  	fOffY = (int32_t)(fLogicalH - fHeight) / 2;
@@ -65,9 +65,9 @@ index a62416c..6fe9eaa 100644
  	setProperty("external", false);
  	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
  	registerService();
--	IOLog("SWEET FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u\n",
+-	IOLog("TULIP FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u\n",
 -	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id, fLogicalW, fLogicalH);
-+	IOLog("SWEET FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u, panel %u bpp\n",
++	IOLog("TULIP FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u, panel %u bpp\n",
 +	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id, fLogicalW, fLogicalH, fPanelBpp * 8);
  	return true;
  }

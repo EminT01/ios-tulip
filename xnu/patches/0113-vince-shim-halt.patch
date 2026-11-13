@@ -53,16 +53,16 @@ index 0000000..0e6d4cd
 +	(void)result;
 +	vm_offset_t page = ml_io_map(CTL_PAGE_PA, 0x1000);
 +	if (!page) {
-+		printf("VINCE CTL: mapping failed\n");
++		printf("TULIP CTL: mapping failed\n");
 +		return;
 +	}
 +	volatile uint32_t *word = (volatile uint32_t *)(page + CTL_WORD);
 +	*word = 0;
-+	printf("VINCE CTL: waiting for a halt request at PA %#x\n", CTL_PAGE_PA + CTL_WORD);
++	printf("TULIP CTL: waiting for a halt request at PA %#x\n", CTL_PAGE_PA + CTL_WORD);
 +	for (;;) {
 +		if (*word == CTL_HALT) {
 +			*word = CTL_SEEN;
-+			printf("VINCE CTL: halt requested by the shim\n");
++			printf("TULIP CTL: halt requested by the shim\n");
 +			reboot_kernel(RB_HALT, ctl_msg);
 +		}
 +		uint64_t deadline;
@@ -85,7 +85,7 @@ index 0000000..0e6d4cd
 +	if (kernel_thread_start(ctl_thread, NULL, &thread) == KERN_SUCCESS) {
 +		thread_deallocate(thread);
 +	} else {
-+		printf("VINCE CTL: thread not started\n");
++		printf("TULIP CTL: thread not started\n");
 +	}
 +}
 +#endif /* ARM64_BOARD_CONFIG_VINCE */

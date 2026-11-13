@@ -120,7 +120,7 @@
  	uint32_t mask = get32(rec, 0x104);
  
 +	if ((++sweet_fb_swap_count % 100) == 0) {
-+		IOLog("SWEET FB: %llu swaps\n", sweet_fb_swap_count);
++		IOLog("TULIP FB: %llu swaps\n", sweet_fb_swap_count);
 +	}
 +
  	if (!fConsolePaused) {

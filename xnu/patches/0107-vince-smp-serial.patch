@@ -43,7 +43,7 @@ index a5af49d..fe548a5 100644
  #endif
  	/*
 @@ -171,6 +183,7 @@ SweetCPU::start(IOService *provider)
- 		IOLog("SWEET CPU: cpu %u (MPIDR %#x) %s\n", cpu->cpu_id, fPhysId,
+ 		IOLog("TULIP CPU: cpu %u (MPIDR %#x) %s\n", cpu->cpu_id, fPhysId,
  		    result != KERN_SUCCESS ? "not started" :
  		    getCPUState() == kIOCPUStateRunning ? "running" : "did not come up within 1 s");
 +		os_atomic_store(&gVinceStartBusy, 0, release);
@@ -51,10 +51,10 @@ index a5af49d..fe548a5 100644
  		finishStart(topology);
  		return true;
 @@ -180,6 +193,7 @@ SweetCPU::start(IOService *provider)
- 		panic("SWEET CPU: processor_start failed: %d", result);
+ 		panic("TULIP CPU: processor_start failed: %d", result);
  	}
  #if defined(VINCE)
 +	os_atomic_store(&gVinceBootRegistered, 1, release);
  	registerService();
- 	IOLog("SWEET CPU: boot CPU %u (MPIDR %#x) registered, SGI1 verified\n", getCPUNumber(), fPhysId);
+ 	IOLog("TULIP CPU: boot CPU %u (MPIDR %#x) registered, SGI1 verified\n", getCPUNumber(), fPhysId);
  	finishStart(topology);

@@ -50,7 +50,7 @@ new file mode 100644
 +		return false;
 +	}
 +	if (topology->num_cpus != 1) {
-+		panic("SWEET CPU: only single-CPU bring-up is supported");
++		panic("TULIP CPU: only single-CPU bring-up is supported");
 +	}
 +	if (!IOCPU::start(provider)) {
 +		return false;
@@ -78,16 +78,16 @@ new file mode 100644
 +	perfmon_interrupt_handler_func pmi_handler = NULL;
 +	kern_return_t result = ml_processor_register(&info, &machProcessor, &ipi_handler, &pmi_handler);
 +	if (result != KERN_SUCCESS) {
-+		panic("SWEET CPU: ml_processor_register failed: %d", result);
++		panic("TULIP CPU: ml_processor_register failed: %d", result);
 +	}
 +	if (pmi_handler != NULL) {
-+		panic("SWEET CPU: PMI routing is not implemented");
++		panic("TULIP CPU: PMI routing is not implemented");
 +	}
 +
 +	/* Re-enter the boot CPU through cpu_machine_init -> PE_cpu_machine_init. */
 +	result = processor_start(machProcessor);
 +	if (result != KERN_SUCCESS || getCPUState() != kIOCPUStateRunning) {
-+		panic("SWEET CPU: processor_start failed: %d", result);
++		panic("TULIP CPU: processor_start failed: %d", result);
 +	}
 +	ml_cpu_init_completed();
 +	cpusRunning();
@@ -96,7 +96,7 @@ new file mode 100644
 +
 +	/* Announce completion only after registration, startup and SGI validation. */
 +	ml_set_max_cpus(topology->max_cpu_id + 1);
-+	IOLog("SWEET CPU: boot CPU %u registered, SGI1 verified, initialization complete\n",
++	IOLog("TULIP CPU: boot CPU %u registered, SGI1 verified, initialization complete\n",
 +	    getCPUNumber());
 +	return true;
 +}
@@ -112,7 +112,7 @@ new file mode 100644
 +SweetCPU::initCPU(bool boot)
 +{
 +	if (!boot) {
-+		panic("SWEET CPU: resume is not implemented");
++		panic("TULIP CPU: resume is not implemented");
 +	}
 +	assert(cpu_number() == (int)getCPUNumber());
 +	assert(ml_get_interrupts_enabled());
@@ -124,7 +124,7 @@ new file mode 100644
 +	signalCPU(this);
 +	while (!ml_cpu_signal_is_enabled()) {
 +		if (mach_absolute_time() > deadline) {
-+			panic("SWEET CPU: SGI1 self-test timed out");
++			panic("TULIP CPU: SGI1 self-test timed out");
 +		}
 +		__asm__ volatile("yield");
 +	}
@@ -136,7 +136,7 @@ new file mode 100644
 +{
 +	/* Only the boot CPU is registered by this driver. */
 +	if (target != this || cpu_number() != (int)getCPUNumber()) {
-+		panic("SWEET CPU: secondary CPU signalling is not implemented");
++		panic("TULIP CPU: secondary CPU signalling is not implemented");
 +	}
 +#if defined(VINCE)
 +	extern vm_offset_t vince_gicd_base;
@@ -149,7 +149,7 @@ new file mode 100644
 +	uint64_t mpidr = __builtin_arm_rsr64("MPIDR_EL1");
 +	unsigned int aff0 = mpidr & 0xff;
 +	if (aff0 >= 16) {
-+		panic("SWEET CPU: SGI target requires unsupported range selector");
++		panic("TULIP CPU: SGI target requires unsupported range selector");
 +	}
 +	uint64_t sgi = (((mpidr >> 32) & 0xff) << 48) |
 +	    (((mpidr >> 16) & 0xff) << 32) |
@@ -170,13 +170,13 @@ new file mode 100644
 +void
 +SweetCPU::quiesceCPU(void)
 +{
-+	panic("SWEET CPU: CPU quiesce is not implemented");
++	panic("TULIP CPU: CPU quiesce is not implemented");
 +}
 +
 +void
 +SweetCPU::haltCPU(void)
 +{
-+	panic("SWEET CPU: CPU halt/suspend is not implemented");
++	panic("TULIP CPU: CPU halt/suspend is not implemented");
 +}
 +
 +const OSSymbol *

@@ -5,9 +5,9 @@ index 3a1013f..d3399b4 100755
 @@ -138,5 +138,7 @@ vince_rootfix(void)
  	    vince_bluetool_plist_orig_len, 0644);
  	e3 = vf_patch_string("/System/Library/xpc/launchd.plist", prefix, sizeof(prefix), "/usr/sbin/BlueTool", "/usr/sbin/vince-bt");
- 	printf("VINCE ROOTFIX: BlueTool stand-in %d, job file restored %d, launchd cache: %d replaced\n", e1, e2, e3);
+ 	printf("TULIP ROOTFIX: BlueTool stand-in %d, job file restored %d, launchd cache: %d replaced\n", e1, e2, e3);
 +	/* wifip2pd cannot start without an AWDL interface and its respawning held up wifid's join handling */
-+	printf("VINCE ROOTFIX: wifip2pd stand-in %d\n", vf_write("/usr/libexec/wifip2pd", vince_p2pd_bin, vince_p2pd_bin_len, 0755));
++	printf("TULIP ROOTFIX: wifip2pd stand-in %d\n", vf_write("/usr/libexec/wifip2pd", vince_p2pd_bin, vince_p2pd_bin_len, 0755));
  }
  #endif /* ARM64_BOARD_CONFIG_VINCE */
 diff --git a/bsd/dev/vince_userland_data.h b/bsd/dev/vince_userland_data.h

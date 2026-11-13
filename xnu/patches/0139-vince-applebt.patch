@@ -18,8 +18,8 @@ index 47a48ab..30d6f12 100755
 @@ -372,6 +374,7 @@ vbt_thread(void *arg, wait_result_t w)
  	}
  	vbt_up = true;
- 	printf("VINCE BT: controller channels open\n");
-+	printf("VINCE BT: IOKit services: %d\n", vince_bt_iokit_publish());
+ 	printf("TULIP BT: controller channels open\n");
++	printf("TULIP BT: IOKit services: %d\n", vince_bt_iokit_publish());
  	for (;;) {
  		int n, busy = 0;
  
@@ -66,14 +66,14 @@ index 47a48ab..30d6f12 100755
 +	vbt_tail = vbt_head;
 +	bzero(vbt_seq, sizeof(vbt_seq));
 +	lck_mtx_unlock(vbt_lock);
-+	printf("VINCE BT: AppleBTHci opened\n");
++	printf("TULIP BT: AppleBTHci opened\n");
 +	return 0;
 +}
 +
 +void
 +vince_bt_hci_close(void)
 +{
-+	printf("VINCE BT: AppleBTHci closed\n");
++	printf("TULIP BT: AppleBTHci closed\n");
 +}
 +
 +void
@@ -338,7 +338,7 @@ index 0000000..c6986d2
 +	}
 +	n++;
 +	proc_selfname(name, sizeof(name));
-+	IOLog("VINCE BT IO: %s selector %u by %s, in %u/%u out %u/%u\n", what, selector, name,
++	IOLog("TULIP BT IO: %s selector %u by %s, in %u/%u out %u/%u\n", what, selector, name,
 +	    args->scalarInputCount, (unsigned)args->structureInputSize, args->scalarOutputCount,
 +	    (unsigned)args->structureOutputSize);
 +}
@@ -559,7 +559,7 @@ index 0000000..c6986d2
 +	vbt_mod->registerService();
 +	vbt_mgmt->registerService();
 +	vbt_hci->registerService();
-+	IOLog("VINCE BT IO: AppleBTMgmt, AppleBTHci and AppleBluetoothModule registered\n");
++	IOLog("TULIP BT IO: AppleBTMgmt, AppleBTHci and AppleBluetoothModule registered\n");
 +	return 0;
 +}
 +#endif /* ARM64_BOARD_CONFIG_VINCE */

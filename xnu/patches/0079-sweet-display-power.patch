@@ -70,7 +70,7 @@
 +				fFB->fDirty = true;     /* on: redraw the latest frame */
 +			}
 +			IOLockUnlock(fFB->fLock);
-+			IOLog("SWEET FB: display %s\n", off ? "off" : "on");
++			IOLog("TULIP FB: display %s\n", off ? "off" : "on");
 +		}
 +		break;
  	case kSweetFBSwapWait:

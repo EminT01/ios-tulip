@@ -12,7 +12,7 @@ diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
 +			 * cannot be a sealed volume. Report it instead of panicking.
 +			 */
 +			if (autherr) {
-+				printf("SWEET: root volume is not authenticated (error %d); continuing unsealed\n", autherr);
++				printf("TULIP: root volume is not authenticated (error %d); continuing unsealed\n", autherr);
 +			}
 +#else
  			if (autherr) {

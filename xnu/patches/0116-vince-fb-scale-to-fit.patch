@@ -67,10 +67,10 @@ index 6fe9eaa..4ff1cd1 100644
  	fPixels = fSurface != NULL ? fSurface->kernelAddress() : 0;
 @@ -232,6 +273,10 @@ AppleCLCD::start(IOService *provider)
  	registerService();
- 	IOLog("SWEET FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u, panel %u bpp\n",
+ 	IOLog("TULIP FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u, panel %u bpp\n",
  	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id, fLogicalW, fLogicalH, fPanelBpp * 8);
 +	if (fScaled) {
-+		IOLog("SWEET FB: scaled to fit: %ux%u -> %ux%u at x %u (vincefb_crop=1 for the centred crop)\n",
++		IOLog("TULIP FB: scaled to fit: %ux%u -> %ux%u at x %u (vincefb_crop=1 for the centred crop)\n",
 +		    fShadowW, fShadowH, fOutW, fHeight, fBarX);
 +	}
  	return true;

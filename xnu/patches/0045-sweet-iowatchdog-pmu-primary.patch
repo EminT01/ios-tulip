@@ -36,5 +36,5 @@
  	setProperty(kIOUserClientClassKey, "IOWatchdogUserClient");
 +	setProperty("IOPMUPrimary", 1ULL, 32);
  	registerService();
- 	IOLog("SWEET WDT: IOWatchdog registered (accepts check-ins, never fires)\n");
+ 	IOLog("TULIP WDT: IOWatchdog registered (accepts check-ins, never fires)\n");
  	return true;

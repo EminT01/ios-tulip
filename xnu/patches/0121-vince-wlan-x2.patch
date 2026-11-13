@@ -126,9 +126,9 @@ index 7efd090..b5c57a4 100755
   * Message layout from mainline drivers/net/wireless/ath/wcn36xx (hal.h, smd.c; GPL-2.0): every HAL message starts
   * with { u16 type, u16 version, u32 total length }, little endian, and the firmware answers type + 1.
   *
-- * Boot-arg: vincewlan=1 turns it on (default off). Log lines start with "VINCE WLAN:" (tools/xnulog.py --con).
+- * Boot-arg: vincewlan=1 turns it on (default off). Log lines start with "TULIP WLAN:" (tools/xnulog.py --con).
 + * Boot-arg vincewlan=N (default 0 = off): 1 = HAL start and feature exchange (X1), 2 = also DXE and a scan of
-+ * channels 1..13 with a BSS list (X2). Log lines start with "VINCE WLAN:" (tools/xnulog.py --con).
++ * channels 1..13 with a BSS list (X2). Log lines start with "TULIP WLAN:" (tools/xnulog.py --con).
   */
  #if defined(ARM64_BOARD_CONFIG_VINCE)
  #include <sys/param.h>
@@ -333,14 +333,14 @@ index 7efd090..b5c57a4 100755
 +	const struct vd_bss *b = vd_bss_list(&n);
 +	struct vd_stats st;
 +
-+	printf("VINCE WLAN: scan found %u networks\n", n);
++	printf("TULIP WLAN: scan found %u networks\n", n);
 +	for (uint32_t i = 0; i < n; i++) {
-+		printf("VINCE WLAN: bss %02x:%02x:%02x:%02x:%02x:%02x ch %u rssi %d x%u rsn %u \"%s\"\n",
++		printf("TULIP WLAN: bss %02x:%02x:%02x:%02x:%02x:%02x ch %u rssi %d x%u rsn %u \"%s\"\n",
 +		    b[i].bssid[0], b[i].bssid[1], b[i].bssid[2], b[i].bssid[3], b[i].bssid[4], b[i].bssid[5],
 +		    b[i].ch, b[i].rssi, b[i].count, b[i].rsn_len, b[i].ssid);
 +	}
 +	vd_get_stats(&st);
-+	printf("VINCE WLAN: dxe rx_l %u rx_h %u bad_bd %u errors %u\n", st.frames_l, st.frames_h, st.bad_bd, st.errors);
++	printf("TULIP WLAN: dxe rx_l %u rx_h %u bad_bd %u errors %u\n", st.frames_l, st.frames_h, st.bad_bd, st.errors);
 +}
 +
 +/* X2: DXE up, self station, active scan of channels 1..13 (120 ms each, two probe requests at the start) */
@@ -357,16 +357,16 @@ index 7efd090..b5c57a4 100755
 +	vw_mac[5] = (uint8_t)(c ^ c >> 8 ^ c >> 16);    /* a new station address per Pronto start (shim wlan.c) */
 +
 +	r = vd_init();
-+	printf("VINCE WLAN: dxe init %d\n", r);
++	printf("TULIP WLAN: dxe init %d\n", r);
 +	if (r) {
 +		return r;
 +	}
 +	r = vw_add_sta_self(vw_mac, self);
 +	if (r) {
-+		printf("VINCE WLAN: ADD_STA_SELF failed %d\n", r);
++		printf("TULIP WLAN: ADD_STA_SELF failed %d\n", r);
 +		return r;
 +	}
-+	printf("VINCE WLAN: self %02x:%02x:%02x:%02x:%02x:%02x sta %u dpu %u/%u\n", vw_mac[0], vw_mac[1], vw_mac[2],
++	printf("TULIP WLAN: self %02x:%02x:%02x:%02x:%02x:%02x sta %u dpu %u/%u\n", vw_mac[0], vw_mac[1], vw_mac[2],
 +	    vw_mac[3], vw_mac[4], vw_mac[5], self[0], self[1], self[2]);
 +	ctx.sta_index = self[0];
 +	ctx.dpu_desc_idx = self[1];
@@ -377,18 +377,18 @@ index 7efd090..b5c57a4 100755
 +	vd_bss_clear();
 +	r = vw_scan_init();
 +	if (r) {
-+		printf("VINCE WLAN: INIT_SCAN failed %d\n", r);
++		printf("TULIP WLAN: INIT_SCAN failed %d\n", r);
 +		return r;
 +	}
 +	for (uint8_t ch = 1; ch <= 13; ch++) {
 +		if (vw_scan_start(ch)) {
-+			printf("VINCE WLAN: START_SCAN failed on channel %u\n", ch);
++			printf("TULIP WLAN: START_SCAN failed on channel %u\n", ch);
 +			break;
 +		}
 +		for (int k = 0; k < probes; k++) {
 +			r = vd_tx_mgmt(&ctx, pr, prlen, 1);
 +			if (r) {
-+				printf("VINCE WLAN: probe request tx failed %d on channel %u\n", r, ch);
++				printf("TULIP WLAN: probe request tx failed %d on channel %u\n", r, ch);
 +				probes = 0;     /* stop sending after the first failure */
 +				break;
 +			}
@@ -396,12 +396,12 @@ index 7efd090..b5c57a4 100755
 +		}
 +		vd_poll(120);
 +		if (vw_scan_end(ch)) {
-+			printf("VINCE WLAN: END_SCAN failed on channel %u\n", ch);
++			printf("TULIP WLAN: END_SCAN failed on channel %u\n", ch);
 +			break;
 +		}
 +	}
 +	r = vw_scan_finish(1);
-+	printf("VINCE WLAN: FINISH_SCAN %d\n", r);
++	printf("TULIP WLAN: FINISH_SCAN %d\n", r);
 +	vd_poll(50);
 +	vw_log_bss();
 +	return 0;
@@ -421,23 +421,23 @@ index 7efd090..b5c57a4 100755
 @@ -203,8 +431,20 @@ vw_thread(void *arg, wait_result_t w)
  		goto out;
  	}
- 	printf("VINCE WLAN: WLAN_CTRL open\n");
+ 	printf("TULIP WLAN: WLAN_CTRL open\n");
 -	if (vw_start() == 0 && vw_caps() == 0) {
--		printf("VINCE WLAN: X1 done, HAL is up\n");
+-		printf("TULIP WLAN: X1 done, HAL is up\n");
 +	if (stage >= 2) {
 +		if (!vd_map()) {
-+			printf("VINCE WLAN: DXE mapping failed\n");
++			printf("TULIP WLAN: DXE mapping failed\n");
 +			goto out;
 +		}
 +		/* mainline sets the tx-rings-empty SMSM bit before it starts the chip */
-+		printf("VINCE WLAN: SMSM tx-rings-empty %d\n", vd_smsm_rings_empty());
++		printf("TULIP WLAN: SMSM tx-rings-empty %d\n", vd_smsm_rings_empty());
 +	}
 +	if (vw_start() || vw_caps()) {
 +		goto out;
 +	}
-+	printf("VINCE WLAN: X1 done, HAL is up\n");
++	printf("TULIP WLAN: X1 done, HAL is up\n");
 +	if (stage >= 2 && vw_scan_all() == 0) {
-+		printf("VINCE WLAN: X2 done\n");
++		printf("TULIP WLAN: X2 done\n");
  	}
  out:
  	(void)thread_terminate(current_thread());

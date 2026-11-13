@@ -463,13 +463,13 @@ index 0705c63..264ef5c 100644
 +		/* a stored offset is believed when it puts the clock between the build time and ten years later */
 +		if (vince_pmic_load_offset(&off) == 0 && (long)off + sec >= build - 86400 && (long)off + sec < build + 315360000L) {
 +			vince_rtc_offset = off;
-+			IOLog("VINCE RTC: stored offset %u, clock %ld\n", off, (long)off + sec);
++			IOLog("TULIP RTC: stored offset %u, clock %ld\n", off, (long)off + sec);
 +		} else {
 +			vince_rtc_offset = (uint32_t)(build - (long)sec);
-+			IOLog("VINCE RTC: no valid stored offset, starting at the build time %ld\n", build);
++			IOLog("TULIP RTC: no valid stored offset, starting at the build time %ld\n", build);
 +		}
 +	} else {
-+		IOLog("VINCE RTC: PMIC RTC unreadable, clock fixed at the build time\n");
++		IOLog("TULIP RTC: PMIC RTC unreadable, clock fixed at the build time\n");
 +		vince_rtc_offset = (uint32_t)build;
 +	}
 +}
@@ -497,7 +497,7 @@ index 0705c63..264ef5c 100644
 +		return;
 +	}
 +	vince_rtc_offset = (uint32_t)(secs - (long)sec);
-+	IOLog("VINCE RTC: clock set to %ld, offset %u stored: %d\n", secs, vince_rtc_offset,
++	IOLog("TULIP RTC: clock set to %ld, offset %u stored: %d\n", secs, vince_rtc_offset,
 +	    vince_pmic_store_offset(vince_rtc_offset));
 +}
 +#endif /* ARM64_BOARD_CONFIG_VINCE */
@@ -512,6 +512,6 @@ index 0705c63..264ef5c 100644
 +#if defined(ARM64_BOARD_CONFIG_VINCE)
 +	publishResource("IORTC");      /* IOKitInitializeTime waits 30 s for it */
 +#endif
- 	IOLog("SWEET: platform expert registered\n");
+ 	IOLog("TULIP: platform expert registered\n");
  	return true;
  }

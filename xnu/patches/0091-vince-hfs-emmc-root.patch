@@ -390,7 +390,7 @@ new file mode 100644
 +	STEP(13, mmc_state() != 4);
 +	return 0;
 +fail:
-+	printf("VINCE MMC: init failed at step %d (status 0x%08x)\n", step, vm.err);
++	printf("TULIP MMC: init failed at step %d (status 0x%08x)\n", step, vm.err);
 +	recover();
 +	return EIO;
 +#undef STEP
@@ -420,7 +420,7 @@ new file mode 100644
 +		error = wait_int(INT_XFER, 1000);
 +	}
 +	if (error) {
-+		printf("VINCE MMC: read of %u sectors at 0x%llx failed (status 0x%08x)\n", n, lba, vm.err);
++		printf("TULIP MMC: read of %u sectors at 0x%llx failed (status 0x%08x)\n", n, lba, vm.err);
 +		recover();
 +	}
 +	return error;
@@ -450,7 +450,7 @@ new file mode 100644
 +	}
 +	memcpy(hdr, b, SECTOR);
 +	if (memcmp(hdr, "EFI PART", 8) != 0) {
-+		printf("VINCE MMC: no GPT\n");
++		printf("TULIP MMC: no GPT\n");
 +		return ENXIO;
 +	}
 +	uint64_t entry_lba;
@@ -462,12 +462,12 @@ new file mode 100644
 +	memcpy(&esz, hdr + 84, 4);
 +	memcpy(&ecrc, hdr + 88, 4);
 +	if (hsz < 92 || hsz > SECTOR || esz != 128 || nent == 0 || nent * esz > MAX_SECTORS * SECTOR) {
-+		printf("VINCE MMC: unsupported GPT (header %u, entries %u x %u)\n", hsz, nent, esz);
++		printf("TULIP MMC: unsupported GPT (header %u, entries %u x %u)\n", hsz, nent, esz);
 +		return ENXIO;
 +	}
 +	memset(hdr + 16, 0, 4);
 +	if (crc32_le(hdr, hsz) != hcrc) {
-+		printf("VINCE MMC: GPT header CRC mismatch\n");
++		printf("TULIP MMC: GPT header CRC mismatch\n");
 +		return EIO;
 +	}
 +	error = mmc_read_sectors(entry_lba, (nent * esz + SECTOR - 1) / SECTOR);
@@ -475,7 +475,7 @@ new file mode 100644
 +		return error;
 +	}
 +	if (crc32_le(b, nent * esz) != ecrc) {
-+		printf("VINCE MMC: GPT entry CRC mismatch\n");
++		printf("TULIP MMC: GPT entry CRC mismatch\n");
 +		return EIO;
 +	}
 +	for (uint32_t i = 0; i < nent; i++) {
@@ -503,7 +503,7 @@ new file mode 100644
 +		vm.nsect = last - first + 1;
 +		return 0;
 +	}
-+	printf("VINCE MMC: no GPT partition named \"%s\"\n", want);
++	printf("TULIP MMC: no GPT partition named \"%s\"\n", want);
 +	return ENOENT;
 +}
 +
@@ -713,7 +713,7 @@ new file mode 100644
 +	const char *fs = error ? "" : mmc_fs_signature();
 +	lck_mtx_unlock(&vince_mmc_lock);
 +	if (error) {
-+		printf("VINCE MMC: eMMC root unavailable: %d (LK's last command CMD%u)\n", error, lk_cmd);
++		printf("TULIP MMC: eMMC root unavailable: %d (LK's last command CMD%u)\n", error, lk_cmd);
 +		return error;
 +	}
 +
@@ -729,7 +729,7 @@ new file mode 100644
 +	devfs_make_node(vm.bdev, DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0640, "mmcroot0");
 +	devfs_make_node(makedev(vm.cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0640, "rmmcroot0");
 +	vm.ready = true;
-+	printf("VINCE MMC: \"%s\" at sector 0x%llx, %llu MiB, %s, read-only (8-bit HS 50 MHz, PIO)\n",
++	printf("TULIP MMC: \"%s\" at sector 0x%llx, %llu MiB, %s, read-only (8-bit HS 50 MHz, PIO)\n",
 +	    want, vm.first, vm.nsect * SECTOR >> 20, fs);
 +	return 0;
 +}

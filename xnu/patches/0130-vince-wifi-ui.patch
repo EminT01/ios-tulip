@@ -3,7 +3,7 @@ index 3513764..e703342 100755
 --- a/bsd/dev/vince_wlan.c
 +++ b/bsd/dev/vince_wlan.c
 @@ -858,6 +858,452 @@ vw_station(int stage)
- 	printf("VINCE WLAN: station done after %d reconnect cycles, %d Pronto restarts\n", cycles, restarts);
+ 	printf("TULIP WLAN: station done after %d reconnect cycles, %d Pronto restarts\n", cycles, restarts);
  }
  
 +
@@ -247,14 +247,14 @@ index 3513764..e703342 100755
 +		}
 +	}
 +	if (!hit) {
-+		printf("VINCE UI: network not found\n");
++		printf("TULIP UI: network not found\n");
 +		vui_set_state(VUI_S_INIT);
 +		res[0] = 9;                                     /* APPLE80211_RESULT_TIMEOUT */
 +		vif_a80211_event(9, res, sizeof(res));
 +		return 0;
 +	}
 +	ap = *hit;
-+	printf("VINCE UI: associating with \"%s\" ch %u (%s)\n", ap.ssid, ap.ch, a->open ? "open" : a->has_pmk ? "PMK" : "passphrase");
++	printf("TULIP UI: associating with \"%s\" ch %u (%s)\n", ap.ssid, ap.ch, a->open ? "open" : a->has_pmk ? "PMK" : "passphrase");
 +	vui_set_state(VUI_S_ASSOC);
 +	va_use_rsn(a->open ? 0 : 1);
 +	r = va_connect(&ap, &ar);
@@ -278,7 +278,7 @@ index 3513764..e703342 100755
 +			pl++;
 +		}
 +		r = a->has_pmk ? vwpa_handshake_pmk(&ap, NULL, 0, a->pmk, &wr) : vwpa_handshake_pmk(&ap, a->pass, pl, NULL, &wr);
-+		printf("VINCE UI: handshake %s at step %d (%s) err %d\n", r ? "FAILED" : "done", wr.step, vwpa_step_name(wr.step), wr.err);
++		printf("TULIP UI: handshake %s at step %d (%s) err %d\n", r ? "FAILED" : "done", wr.step, vwpa_step_name(wr.step), wr.err);
 +		if (r) {
 +			bool dead = vw_hal_dead(wr.step, wr.err) || vw_fw_crashed();
 +
@@ -310,11 +310,11 @@ index 3513764..e703342 100755
 +	if (vui_selftest) {
 +		int d = vn_dhcp();
 +
-+		printf("VINCE UI: self-test DHCP %d\n", d);
++		printf("TULIP UI: self-test DHCP %d\n", d);
 +		if (!d) {
 +			const struct vn_cfg *c = vn_get_cfg();
 +
-+			printf("VINCE UI: self-test lease ip %u.%u.%u.%u gw %u.%u.%u.%u\n", c->ip[0], c->ip[1], c->ip[2], c->ip[3],
++			printf("TULIP UI: self-test lease ip %u.%u.%u.%u gw %u.%u.%u.%u\n", c->ip[0], c->ip[1], c->ip[2], c->ip[3],
 +			    c->gw[0], c->gw[1], c->gw[2], c->gw[3]);
 +			if (vif_up(c) == 0) {
 +				vif_start_ping(12, 5000);
@@ -327,7 +327,7 @@ index 3513764..e703342 100755
 +	} else {
 +		why = vif_serve(3600ULL * 1000000ULL * 24, 0, 0);
 +	}
-+	printf("VINCE UI: link ended (%d)\n", why);
++	printf("TULIP UI: link ended (%d)\n", why);
 +	vif_link(false);
 +	vif_down();
 +	vwpa_stop();
@@ -352,7 +352,7 @@ index 3513764..e703342 100755
 +	vince_smd_sleep(4000);
 +	vui_get_info(&in);
 +	gen = in.scan_gen;
-+	printf("VINCE UI TEST: requesting a scan\n");
++	printf("TULIP UI TEST: requesting a scan\n");
 +	vui_post_scan();
 +	for (int i = 0; i < 100; i++) {
 +		vince_smd_sleep(200);
@@ -367,7 +367,7 @@ index 3513764..e703342 100755
 +		while (vui_result(cnt)) {
 +			cnt++;
 +		}
-+		printf("VINCE UI TEST: scan done, %u results\n", cnt);
++		printf("TULIP UI TEST: scan done, %u results\n", cnt);
 +	}
 +	if (PE_parse_boot_argn("vincessid", ssid, sizeof(ssid)) && PE_parse_boot_argn("vincepass", pass, sizeof(pass))) {
 +		uint32_t l = 0;
@@ -382,7 +382,7 @@ index 3513764..e703342 100755
 +		strlcpy(a.pass, pass, sizeof(a.pass));
 +		a.has_pass = 1;
 +		bzero(pass, sizeof(pass));
-+		printf("VINCE UI TEST: associating\n");
++		printf("TULIP UI TEST: associating\n");
 +		vui_post_assoc(&a);
 +		for (int i = 0; i < 150; i++) {
 +			vince_smd_sleep(200);
@@ -391,13 +391,13 @@ index 3513764..e703342 100755
 +				break;
 +			}
 +		}
-+		printf("VINCE UI TEST: state %d ssid_len %u channel %u\n", in.state, in.ssid_len, in.channel);
++		printf("TULIP UI TEST: state %d ssid_len %u channel %u\n", in.state, in.ssid_len, in.channel);
 +		vince_smd_sleep(70000);
-+		printf("VINCE UI TEST: disassociating\n");
++		printf("TULIP UI TEST: disassociating\n");
 +		vui_post_disassoc();
 +		vince_smd_sleep(6000);
 +		vui_get_info(&in);
-+		printf("VINCE UI TEST: state after disassociate %d\n", in.state);
++		printf("TULIP UI TEST: state after disassociate %d\n", in.state);
 +	}
 +	(void)thread_terminate(current_thread());
 +	thread_block(THREAD_CONTINUE_NULL);
@@ -415,7 +415,7 @@ index 3513764..e703342 100755
 +	if (vui_selftest && kernel_thread_start(vui_selftest_thread, NULL, &th) == KERN_SUCCESS) {
 +		thread_deallocate(th);
 +	}
-+	printf("VINCE UI: driver loop running\n");
++	printf("TULIP UI: driver loop running\n");
 +	for (;;) {
 +		int c = vui_take(&a);
 +
@@ -439,11 +439,11 @@ index 3513764..e703342 100755
 +			vif_a80211_event(4, NULL, 0);
 +		}
 +		if (c == 8) {
-+			printf("VINCE UI: restarting Pronto\n");
++			printf("TULIP UI: restarting Pronto\n");
 +			vif_link(false);
 +			vui_set_state(VUI_S_INIT);
 +			if (vw_restart_pronto() || vw_bringup(stage) || vw_prepare(NULL)) {
-+				printf("VINCE UI: Wi-Fi could not be brought back\n");
++				printf("TULIP UI: Wi-Fi could not be brought back\n");
 +				break;
 +			}
 +			vif_ui_up();
@@ -458,7 +458,7 @@ index 3513764..e703342 100755
 @@ -882,7 +1328,18 @@ vw_thread(void *arg, wait_result_t w)
  	(void)PE_parse_boot_argn("vincewlan", &stage, sizeof(stage));
  	if (vw_bringup(stage) == 0 && stage >= 2 && vw_scan_all() == 0) {
- 		printf("VINCE WLAN: X2 done\n");
+ 		printf("TULIP WLAN: X2 done\n");
 -		vw_publish_ui();
 +		{
 +			int ui = 0;
@@ -758,7 +758,7 @@ index a8e0785..c449ff0 100755
 +
 +			if (!a80211_assoc_dumped) {
 +				a80211_assoc_dumped = true;
-+				printf("VINCE A80211: ASSOCIATE data (%u bytes), first 96:", len);
++				printf("TULIP A80211: ASSOCIATE data (%u bytes), first 96:", len);
 +				for (uint32_t i = 0; i < len && i < 96; i++) {
 +					printf("%s%02x", i % 16 ? " " : "\n  ", kb[i]);
 +				}

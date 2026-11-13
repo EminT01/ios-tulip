@@ -3,7 +3,7 @@ index b113ae6..f33d089 100644
 --- a/iokit/Kernel/arm/SweetCPU.cpp
 +++ b/iokit/Kernel/arm/SweetCPU.cpp
 @@ -248,15 +248,40 @@ SweetCPU::initCPU(bool boot)
- 		panic("SWEET CPU: cpu %u has no GIC CPU interface bit", getCPUNumber());
+ 		panic("TULIP CPU: cpu %u has no GIC CPU interface bit", getCPUNumber());
  	}
  	__builtin_arm_dmb(DMB_ISH);
 +#endif
@@ -41,7 +41,7 @@ index b113ae6..f33d089 100644
 +		}
 +#endif
  		if (mach_absolute_time() > deadline) {
- 			panic("SWEET CPU: SGI1 self-test timed out on cpu %u", getCPUNumber());
+ 			panic("TULIP CPU: SGI1 self-test timed out on cpu %u", getCPUNumber());
  		}
 diff --git a/osfmk/arm64/cpu.c b/osfmk/arm64/cpu.c
 index 0828d5c..1a3d142 100644

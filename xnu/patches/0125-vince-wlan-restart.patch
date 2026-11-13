@@ -3,7 +3,7 @@ index 1e4b8b1..fc1bd04 100755
 --- a/bsd/dev/vince_wlan.c
 +++ b/bsd/dev/vince_wlan.c
 @@ -364,19 +364,17 @@ vw_log_bss(void)
- 	printf("VINCE WLAN: dxe rx_l %u rx_h %u bad_bd %u errors %u\n", st.frames_l, st.frames_h, st.bad_bd, st.errors);
+ 	printf("TULIP WLAN: dxe rx_l %u rx_h %u bad_bd %u errors %u\n", st.frames_l, st.frames_h, st.bad_bd, st.errors);
  }
  
 -/* X2: DXE up, self station, active scan of channels 1..13 (120 ms each, two probe requests at the start) */
@@ -26,11 +26,11 @@ index 1e4b8b1..fc1bd04 100755
 +	vw_mac[5] = (uint8_t)(c ^ c >> 8 ^ c >> 16);
 +	vw_have_self = false;
  	r = vd_init();
- 	printf("VINCE WLAN: dxe init %d\n", r);
+ 	printf("TULIP WLAN: dxe init %d\n", r);
  	if (r) {
 @@ -389,11 +387,29 @@ vw_scan_all(void)
  	}
- 	printf("VINCE WLAN: self %02x:%02x:%02x:%02x:%02x:%02x sta %u dpu %u/%u\n", vw_mac[0], vw_mac[1], vw_mac[2],
+ 	printf("TULIP WLAN: self %02x:%02x:%02x:%02x:%02x:%02x sta %u dpu %u/%u\n", vw_mac[0], vw_mac[1], vw_mac[2],
  	    vw_mac[3], vw_mac[4], vw_mac[5], self[0], self[1], self[2]);
 -	ctx.sta_index = self[0];
 -	ctx.dpu_desc_idx = self[1];
@@ -64,7 +64,7 @@ index 1e4b8b1..fc1bd04 100755
  	vd_bss_clear();
  	r = vw_scan_init();
 @@ -534,6 +550,159 @@ leave:
- 	printf("VINCE WLAN: X3 done\n");
+ 	printf("TULIP WLAN: X3 done\n");
  }
  
 +
@@ -136,7 +136,7 @@ index 1e4b8b1..fc1bd04 100755
 +		t[i] = (b >= 0x20 && b < 0x7f) ? (char)b : '.';
 +		t[i + 1] = 0;
 +	}
-+	printf("VINCE WLAN: firmware crash reason: \"%s\"\n", t);
++	printf("TULIP WLAN: firmware crash reason: \"%s\"\n", t);
 +}
 +
 +/* ask the shim (CPU1 monitor) to restart Pronto; 0 when the firmware is back up with the WCNSS_CTRL handshake done */
@@ -150,13 +150,13 @@ index 1e4b8b1..fc1bd04 100755
 +		vw_mbx = (volatile struct vw_mbx *)ml_io_map(MBX_PA, 0x1000);
 +	}
 +	if (!vw_mbx || vw_mbx->magic != MBX_MAGIC) {
-+		printf("VINCE WLAN: the shim has no restart service\n");
++		printf("TULIP WLAN: the shim has no restart service\n");
 +		return -1;
 +	}
 +	b0 = vw_mbx->beat;
 +	vince_smd_sleep(500);
 +	if (vw_mbx->beat == b0) {
-+		printf("VINCE WLAN: the shim's restart service is not running\n");
++		printf("TULIP WLAN: the shim's restart service is not running\n");
 +		return -2;
 +	}
 +	vw_crash_log();
@@ -173,12 +173,12 @@ index 1e4b8b1..fc1bd04 100755
 +	t0 = vd_now_us();
 +	while (vw_mbx->done != req) {
 +		if (vd_now_us() - t0 > 180000000ULL) {
-+			printf("VINCE WLAN: the shim did not finish the restart\n");
++			printf("TULIP WLAN: the shim did not finish the restart\n");
 +			return -3;
 +		}
 +		vince_smd_sleep(100);
 +	}
-+	printf("VINCE WLAN: the shim restarted Pronto, result %u, restarts so far %u\n", vw_mbx->result, vw_mbx->restarts);
++	printf("TULIP WLAN: the shim restarted Pronto, result %u, restarts so far %u\n", vw_mbx->result, vw_mbx->restarts);
 +	return vw_mbx->result ? -4 : 0;
 +}
 +
@@ -193,30 +193,30 @@ index 1e4b8b1..fc1bd04 100755
 +		vince_smd_sleep(250);
 +	}
 +	if (!vince_smd_find("WLAN_CTRL", &vw_ch)) {
-+		printf("VINCE WLAN: no WLAN_CTRL channel (Pronto not started by the shim?)\n");
++		printf("TULIP WLAN: no WLAN_CTRL channel (Pronto not started by the shim?)\n");
 +		return -1;
 +	}
 +	for (int i = 0; i < 10 && (r = vw_open()) != 0; i++) {
 +		vince_smd_sleep(500);
 +	}
 +	if (r) {
-+		printf("VINCE WLAN: WLAN_CTRL open failed %d\n", r);
++		printf("TULIP WLAN: WLAN_CTRL open failed %d\n", r);
 +		return r;
 +	}
-+	printf("VINCE WLAN: WLAN_CTRL open\n");
++	printf("TULIP WLAN: WLAN_CTRL open\n");
 +	if (stage >= 2) {
 +		if (!vd_map()) {
-+			printf("VINCE WLAN: DXE mapping failed\n");
++			printf("TULIP WLAN: DXE mapping failed\n");
 +			return -2;
 +		}
 +		/* mainline sets the tx-rings-empty SMSM bit before it starts the chip */
-+		printf("VINCE WLAN: SMSM tx-rings-empty %d\n", vd_smsm_rings_empty());
++		printf("TULIP WLAN: SMSM tx-rings-empty %d\n", vd_smsm_rings_empty());
 +	}
 +	if (vw_start() || vw_caps()) {
 +		return -3;
 +	}
 +	vw_crash_baseline();
-+	printf("VINCE WLAN: X1 done, HAL is up\n");
++	printf("TULIP WLAN: X1 done, HAL is up\n");
 +	return 0;
 +}
 +
@@ -255,15 +255,15 @@ index 1e4b8b1..fc1bd04 100755
 +		if (need_restart) {
 +			need_restart = false;
 +			if (restarts >= 8) {
-+				printf("VINCE WLAN: too many Pronto restarts, giving up\n");
++				printf("TULIP WLAN: too many Pronto restarts, giving up\n");
 +				break;
 +			}
 +			restarts++;
-+			printf("VINCE WLAN: restarting Pronto (restart %d)\n", restarts);
++			printf("TULIP WLAN: restarting Pronto (restart %d)\n", restarts);
 +			vif_down();
 +			r = vw_restart_pronto();
 +			if (r || vw_bringup(stage) || vw_prepare(NULL)) {
-+				printf("VINCE WLAN: bring-up after the restart failed (%d)\n", r);
++				printf("TULIP WLAN: bring-up after the restart failed (%d)\n", r);
 +				break;
 +			}
 +			attempt = 0;
@@ -274,22 +274,22 @@ index 1e4b8b1..fc1bd04 100755
  		vw_log_assoc(&ar);
  		if (r) {
 -			if (vw_hal_dead(ar.step, ar.err)) {
--				printf("VINCE WLAN: the firmware stopped answering HAL requests (step %d): Wi-Fi needs a Pronto restart\n", ar.step);
+-				printf("TULIP WLAN: the firmware stopped answering HAL requests (step %d): Wi-Fi needs a Pronto restart\n", ar.step);
 -				break;
 +			if (vw_hal_dead(ar.step, ar.err) || vw_fw_crashed()) {
-+				printf("VINCE WLAN: the firmware stopped answering (association step %d)\n", ar.step);
++				printf("TULIP WLAN: the firmware stopped answering (association step %d)\n", ar.step);
 +				need_restart = true;
 +				continue;
  			}
  		} else {
  			r = vwpa_handshake(&ap, pass, pl, &wr);
- 			printf("VINCE WLAN: handshake %s at step %d (%s) err %d, gtk id %u\n", r ? "FAILED" : "done", wr.step,
+ 			printf("TULIP WLAN: handshake %s at step %d (%s) err %d, gtk id %u\n", r ? "FAILED" : "done", wr.step,
  			    vwpa_step_name(wr.step), wr.err, wr.gtk_id);
 -			if (r && vw_hal_dead(wr.step, wr.err)) {
--				printf("VINCE WLAN: the firmware stopped answering HAL requests: Wi-Fi needs a Pronto restart\n");
+-				printf("TULIP WLAN: the firmware stopped answering HAL requests: Wi-Fi needs a Pronto restart\n");
 -				break;
 +			if (r && (vw_hal_dead(wr.step, wr.err) || vw_fw_crashed())) {
-+				printf("VINCE WLAN: the firmware stopped answering (handshake)\n");
++				printf("TULIP WLAN: the firmware stopped answering (handshake)\n");
 +				need_restart = true;
 +				continue;
  			}
@@ -306,20 +306,20 @@ index 1e4b8b1..fc1bd04 100755
 +				need_restart = true;
 +				continue;
 +			}
- 			printf("VINCE WLAN: reconnect attempt %d failed, waiting %u s\n", attempt + 1, backoff);
+ 			printf("TULIP WLAN: reconnect attempt %d failed, waiting %u s\n", attempt + 1, backoff);
  			attempt++;
  			vince_smd_sleep(backoff * 1000);
 @@ -642,11 +835,16 @@ vw_station(void)
  			}
  			(void)vif_up(vif_current_cfg());
  		}
--		printf("VINCE WLAN: serve ended: %s\n", why >= 1 && why <= 5 ? why_names[why] : why_names[0]);
-+		printf("VINCE WLAN: serve ended: %s\n", why >= 1 && why <= 6 ? why_names[why] : why_names[0]);
+-		printf("TULIP WLAN: serve ended: %s\n", why >= 1 && why <= 5 ? why_names[why] : why_names[0]);
++		printf("TULIP WLAN: serve ended: %s\n", why >= 1 && why <= 6 ? why_names[why] : why_names[0]);
  		vif_down();
  		vwpa_stop();
--		printf("VINCE WLAN: leave %d\n", va_leave(&ap, 1));
+-		printf("TULIP WLAN: leave %d\n", va_leave(&ap, 1));
 +		lr = va_leave(&ap, 1);
-+		printf("VINCE WLAN: leave %d\n", lr);
++		printf("TULIP WLAN: leave %d\n", lr);
  		vn_link_reset();
 +		if (why == VIF_END_FWCRASH || (lr <= -2 && lr >= -5) || vw_fw_crashed()) {
 +			need_restart = true;
@@ -332,8 +332,8 @@ index 1e4b8b1..fc1bd04 100755
  	bzero(pass, sizeof(pass));
  	vif_stop_ping();
  	vince_smd_sleep(6000);
--	printf("VINCE WLAN: station done after %d reconnect cycles\n", cycles);
-+	printf("VINCE WLAN: station done after %d reconnect cycles, %d Pronto restarts\n", cycles, restarts);
+-	printf("TULIP WLAN: station done after %d reconnect cycles\n", cycles);
++	printf("TULIP WLAN: station done after %d reconnect cycles, %d Pronto restarts\n", cycles, restarts);
  }
  
  static void
@@ -349,32 +349,32 @@ index 1e4b8b1..fc1bd04 100755
 -		vince_smd_sleep(250);
 -	}
 -	if (!vince_smd_find("WLAN_CTRL", &vw_ch)) {
--		printf("VINCE WLAN: no WLAN_CTRL channel (Pronto not started by the shim?)\n");
+-		printf("TULIP WLAN: no WLAN_CTRL channel (Pronto not started by the shim?)\n");
 -		goto out;
 -	}
 -	for (int i = 0; i < 10 && (r = vw_open()) != 0; i++) {
 -		vince_smd_sleep(500);
 -	}
 -	if (r) {
--		printf("VINCE WLAN: WLAN_CTRL open failed %d\n", r);
+-		printf("TULIP WLAN: WLAN_CTRL open failed %d\n", r);
 -		goto out;
 -	}
--	printf("VINCE WLAN: WLAN_CTRL open\n");
+-	printf("TULIP WLAN: WLAN_CTRL open\n");
 -	if (stage >= 2) {
 -		if (!vd_map()) {
--			printf("VINCE WLAN: DXE mapping failed\n");
+-			printf("TULIP WLAN: DXE mapping failed\n");
 -			goto out;
 -		}
 -		/* mainline sets the tx-rings-empty SMSM bit before it starts the chip */
--		printf("VINCE WLAN: SMSM tx-rings-empty %d\n", vd_smsm_rings_empty());
+-		printf("TULIP WLAN: SMSM tx-rings-empty %d\n", vd_smsm_rings_empty());
 -	}
 -	if (vw_start() || vw_caps()) {
 -		goto out;
 -	}
--	printf("VINCE WLAN: X1 done, HAL is up\n");
+-	printf("TULIP WLAN: X1 done, HAL is up\n");
 -	if (stage >= 2 && vw_scan_all() == 0) {
 +	if (vw_bringup(stage) == 0 && stage >= 2 && vw_scan_all() == 0) {
- 		printf("VINCE WLAN: X2 done\n");
+ 		printf("TULIP WLAN: X2 done\n");
  		if (stage >= 5) {
 -			vw_station();
 +			vw_station(stage);
@@ -483,7 +483,7 @@ index 5b45916..b0c97c4 100755
  	}
  	ifnet_set_lladdr(vif_ifp, mac, ETHER_ADDR_LEN);
 +	bcopy(mac, vif_mac, 6);
- 	printf("VINCE WLAN: %s attached, %02x:%02x:%02x:%02x:%02x:%02x\n", if_name(vif_ifp), mac[0], mac[1], mac[2],
+ 	printf("TULIP WLAN: %s attached, %02x:%02x:%02x:%02x:%02x:%02x\n", if_name(vif_ifp), mac[0], mac[1], mac[2],
  	    mac[3], mac[4], mac[5]);
  	return 0;
 @@ -373,6 +375,9 @@ vif_serve(uint64_t us_total, uint32_t cycle_s, uint32_t t1_override_s)

@@ -195,12 +195,12 @@ index 0000000..05294a8
 +		bool ok = spmi_read(PON_RT_STS, &pon);
 +		int now[3] = {!!(pon & 1u), !(in_rd(tlmm, GPIO_IO(GPIO_VOLUP)) & 1u), !!(pon & 2u)};
 +		if (!ok && (errors++ % 250u) == 0) {
-+			printf("VINCE INPUT: PON read error\n");
++			printf("TULIP INPUT: PON read error\n");
 +		}
 +		for (int k = 0; k < 3; k++) {
 +			if ((k == 1 || ok) && now[k] != state[k]) {
 +				state[k] = now[k];
-+				printf("VINCE INPUT: key %d %s\n", k, state[k] ? "down" : "up");
++				printf("TULIP INPUT: key %d %s\n", k, state[k] ? "down" : "up");
 +				sweet_hid_key(k, state[k]);
 +			}
 +		}
@@ -405,25 +405,25 @@ index 0000000..05294a8
 +			delay(1);
 +		}
 +		if (in_rd(gcc, 0x20) & 0x80000000u) {
-+			printf("VINCE INPUT: QUP3 clock did not start (cmd %#x cbcr %#x)\n",
++			printf("TULIP INPUT: QUP3 clock did not start (cmd %#x cbcr %#x)\n",
 +			    in_rd(gcc, 0x00), in_rd(gcc, 0x20));
 +			return false;
 +		}
 +	}
 +	in_wr(qup, QUP_SW_RESET, 1);
 +	if (qup_poll(ST_RESET, ST_MASK)) {
-+		printf("VINCE INPUT: QUP3 reset timeout (state %#x)\n", in_rd(qup, QUP_STATE));
++		printf("TULIP INPUT: QUP3 reset timeout (state %#x)\n", in_rd(qup, QUP_STATE));
 +		return false;
 +	}
 +	uint32_t io = in_rd(qup, QUP_IO_MODE);
 +	uint32_t ob = blk[io & 3u], ib = blk[(io >> 5) & 3u];
 +	if (!ob || !ib) {
-+		printf("VINCE INPUT: QUP3 io mode %#x unsupported\n", io);
++		printf("TULIP INPUT: QUP3 io mode %#x unsupported\n", io);
 +		return false;
 +	}
 +	qup_out_fifo = ob / 2 * (2u << ((io >> 2) & 7u));
 +	qup_in_fifo = ib / 2 * (2u << ((io >> 7) & 7u));
-+	printf("VINCE INPUT: QUP3 hw %#x io %#x fifo in %u out %u\n",
++	printf("TULIP INPUT: QUP3 hw %#x io %#x fifo in %u out %u\n",
 +	    in_rd(qup, QUP_HW_VERSION), io, qup_in_fifo, qup_out_fifo);
 +	return true;
 +}
@@ -453,12 +453,12 @@ index 0000000..05294a8
 +		uint8_t e[6];
 +		int r = rmi_read((uint16_t)a, e, 6);
 +		if (r && a == 0xe9 && qup_clk_ctl != CLK_CTL_100K) {
-+			printf("VINCE INPUT: RMI4 read at 400 kHz failed %d, retrying at 100 kHz\n", r);
++			printf("TULIP INPUT: RMI4 read at 400 kHz failed %d, retrying at 100 kHz\n", r);
 +			qup_clk_ctl = CLK_CTL_100K;
 +			r = rmi_read((uint16_t)a, e, 6);
 +		}
 +		if (r) {
-+			printf("VINCE INPUT: RMI4 PDT read at %#x failed %d\n", a, r);
++			printf("TULIP INPUT: RMI4 PDT read at %#x failed %d\n", a, r);
 +			goto out;
 +		}
 +		if (e[5] == 0 || e[5] == 0xff) {
@@ -470,15 +470,15 @@ index 0000000..05294a8
 +			f12_data = e[3];
 +			f12_mask = (uint8_t)(((1u << (e[4] & 7u)) - 1u) << bit);
 +		}
-+		printf("VINCE INPUT: RMI4 F%02x query %#x ctrl %#x data %#x irqs %u\n",
++		printf("TULIP INPUT: RMI4 F%02x query %#x ctrl %#x data %#x irqs %u\n",
 +		    e[5], e[0], e[2], e[3], e[4] & 7u);
 +		bit = (uint8_t)(bit + (e[4] & 7u));
 +	}
 +	if (!f01_data && !f12_data) {
-+		printf("VINCE INPUT: no RMI4 F01/F12; touch off\n");
++		printf("TULIP INPUT: no RMI4 F01/F12; touch off\n");
 +		goto out;
 +	}
-+	printf("VINCE INPUT: touch on, F12 data %#x irq mask %#x, %d fingers\n",
++	printf("TULIP INPUT: touch on, F12 data %#x irq mask %#x, %d fingers\n",
 +	    f12_data, f12_mask, VINCE_TOUCH_FINGERS);
 +
 +	for (;;) {
@@ -502,7 +502,7 @@ index 0000000..05294a8
 +		}
 +		if (r) {
 +			if ((errors++ % 100u) == 0) {
-+				printf("VINCE INPUT: touch read error %d (i2c %#x qup %#x)\n", r,
++				printf("TULIP INPUT: touch read error %d (i2c %#x qup %#x)\n", r,
 +				    in_rd(qup, QUP_I2C_STATUS), in_rd(qup, QUP_ERROR_FLAGS));
 +			}
 +			if (errors == 5) {
@@ -532,7 +532,7 @@ index 0000000..05294a8
 +	(void)PE_parse_boot_argn("vincetouch", &touch, sizeof(touch));
 +	tlmm = ml_io_map(TLMM_PA, TLMM_SIZE);
 +	if (!tlmm) {
-+		printf("VINCE INPUT: TLMM mapping failed\n");
++		printf("TULIP INPUT: TLMM mapping failed\n");
 +		return;
 +	}
 +	if (keys) {
@@ -543,12 +543,12 @@ index 0000000..05294a8
 +		if (apid != NO_APID) {
 +			spmi_obs = ml_io_map(SPMI_OBS_PA + 0x8000u * apid, 0x1000);
 +		}
-+		printf("VINCE INPUT: keys: arbiter %#x PON apid %u owner EE %u\n",
++		printf("TULIP INPUT: keys: arbiter %#x PON apid %u owner EE %u\n",
 +		    spmi_core ? in_rd(spmi_core, 0) : 0, apid, owner);
 +		if (spmi_obs && kernel_thread_start(keys_thread, NULL, &thread) == KERN_SUCCESS) {
 +			thread_deallocate(thread);
 +		} else {
-+			printf("VINCE INPUT: keys not started\n");
++			printf("TULIP INPUT: keys not started\n");
 +		}
 +	}
 +	if (touch) {
@@ -557,7 +557,7 @@ index 0000000..05294a8
 +		if (gcc && qup && kernel_thread_start(touch_thread, NULL, &thread) == KERN_SUCCESS) {
 +			thread_deallocate(thread);
 +		} else {
-+			printf("VINCE INPUT: touch not started\n");
++			printf("TULIP INPUT: touch not started\n");
 +		}
 +	}
 +}
@@ -576,7 +576,7 @@ index 3bc55b0..0300091 100644
  #define SDCC1_PHYS      0x07824000ul    /* MCI core; the SDHCI registers start at +0x900 */
  #define GCC_SDCC1_PHYS  0x01842000ul    /* SDCC1 BCR, then the apps RCG at +4 */
 @@ -830,6 +832,7 @@ vince_mmc_init(void)
- 	printf("VINCE MMC: \"%s\" at sector 0x%llx, %llu MiB, %s, %s (8-bit HS 50 MHz, PIO)\n",
+ 	printf("TULIP MMC: \"%s\" at sector 0x%llx, %llu MiB, %s, %s (8-bit HS 50 MHz, PIO)\n",
  	    want, vm.first, vm.nsect * SECTOR >> 20, fs, vm.rw ? "read-write" : "read-only");
  	sweet_sample_start();
 +	vince_input_start();

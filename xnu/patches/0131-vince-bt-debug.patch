@@ -9,12 +9,12 @@ index 67a3edb..ce00955 100755
 -#pragma unused(dev, flags, devtype, p)
 +#pragma unused(flags, devtype)
  	vbt_opens++;
-+	printf("VINCE BT: open minor %d by %s\n", minor(dev), p ? proc_best_name(p) : "?");
++	printf("TULIP BT: open minor %d by %s\n", minor(dev), p ? proc_best_name(p) : "?");
  	return 0;
  }
  
 @@ -423,10 +424,13 @@ vince_bt_start(void)
- 		printf("VINCE BT: cdevsw_add failed\n");
+ 		printf("TULIP BT: cdevsw_add failed\n");
  		return;
  	}
 -	(void)devfs_make_node(makedev(vbt_major, 0), DEVFS_CHAR, UID_ROOT, GID_WHEEL, 0666, "uart.bluetooth");
@@ -26,8 +26,8 @@ index 67a3edb..ce00955 100755
 +		void *n1 = devfs_make_node(makedev(vbt_major, 1), DEVFS_CHAR, UID_ROOT, GID_WHEEL, 0666, "cu.bluetooth");
 +		void *n2 = devfs_make_node(makedev(vbt_major, 2), DEVFS_CHAR, UID_ROOT, GID_WHEEL, 0666, "btwake");
 +		void *n3 = devfs_make_node(makedev(vbt_major, 3), DEVFS_CHAR, UID_ROOT, GID_WHEEL, 0666, "uart.log");
-+		printf("VINCE BT: devfs nodes %p %p %p %p\n", n0, n1, n2, n3);
++		printf("TULIP BT: devfs nodes %p %p %p %p\n", n0, n1, n2, n3);
 +	}
  	if (kernel_thread_start(vbt_thread, NULL, &th) == KERN_SUCCESS) {
  		thread_deallocate(th);
- 		printf("VINCE BT: /dev/uart.bluetooth and /dev/cu.bluetooth registered (major %d)\n", vbt_major);
+ 		printf("TULIP BT: /dev/uart.bluetooth and /dev/cu.bluetooth registered (major %d)\n", vbt_major);

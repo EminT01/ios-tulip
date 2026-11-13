@@ -93,8 +93,8 @@ def build_tulip_adt(seed=None):
         ('chip-id', u32(0x8015)),  # Apple A11 Bionic (iPhone X)
         ('board-id', u32(0x16)),
         ('embedded-panic-log-size', u32(PANIC_LOG_SIZE)),
-        ('firmware-version', cstr('vince-shim')),
-        ('system-firmware-version', cstr('vince-shim')),
+        ('firmware-version', cstr('tulip-shim')),
+        ('system-firmware-version', cstr('tulip-shim')),
         ('boot-manifest-hash', BOOT_MANIFEST_HASH),
         ('crypto-hash-method', cstr('sha2-384')),
         ('certificate-production-status', u32(0)),
@@ -139,7 +139,6 @@ def build_tulip_adt(seed=None):
         ph(),
         ('compatible', cstr('generic-sdhci') + cstr('qcom,sdhci-msm-v5') + b'\0'),
         ('reg', u64(SDHCI, SDHCI_SIZE, SDHCI_CORE, 0x1000)),
-        ('interrupts', u32(0, 125, 4)),
     ])
 
     # Synaptics RMI4 Touchscreen Node

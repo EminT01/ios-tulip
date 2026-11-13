@@ -17,7 +17,7 @@
  #define REG_CAP         0x00
  #define REG_IS          0x20
 @@ -591,10 +596,117 @@
- 	printf("SWEET UFS: \"%s\" on LUN %u: first block 0x%llx, %llu MiB, %s, DMA at 0x%llx\n",
+ 	printf("TULIP UFS: \"%s\" on LUN %u: first block 0x%llx, %llu MiB, %s, DMA at 0x%llx\n",
  	    want, su.lun, su.first_block, su.nblocks * UFS_BLOCK >> 20,
  	    su.writable ? "read-write" : "read-only", su.dma_pa);
 +	sweet_log_start();
@@ -72,7 +72,7 @@
 +	uint64_t flushed = 0, seq = 0;
 +	void *bounce = (void *)(su.dma + DMA_BOUNCE);
 +
-+	printf("SWEET LOG: console log to the last %u KiB of the partition (block 0x%llx)\n",
++	printf("TULIP LOG: console log to the last %u KiB of the partition (block 0x%llx)\n",
 +	    SWEET_LOG_BLOCKS * UFS_BLOCK >> 10, base);
 +	for (;;) {
 +		(void)tsleep(&sweet_log_chan, PZERO, "sweetlog", hz);
@@ -108,7 +108,7 @@
 +		}
 +		lck_mtx_unlock(&sweet_ufs_lock);
 +		if (error) {
-+			printf("SWEET LOG: write failed (%d), stopping\n", error);
++			printf("TULIP LOG: write failed (%d), stopping\n", error);
 +			return;
 +		}
 +		flushed = total;

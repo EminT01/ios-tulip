@@ -121,7 +121,7 @@
 +	size_t xml_len = 0;
 +
 +	if (csblob_get_entitlements(code_signing_blob, &xml, &xml_len) != 0) {
-+		printf("SWEET AMFI: %s: entitlements do not match the code directory, granting none\n",
++		printf("TULIP AMFI: %s: entitlements do not match the code directory, granting none\n",
 +		    csblob_get_identity(code_signing_blob));
 +		return;
 +	}
@@ -130,13 +130,13 @@
 +	}
 +	void *ent = sweet_entitlements_create(xml, xml_len);
 +	if (ent == NULL) {
-+		printf("SWEET AMFI: %s: unreadable entitlements (%zu bytes), granting none\n",
++		printf("TULIP AMFI: %s: unreadable entitlements (%zu bytes), granting none\n",
 +		    csblob_get_identity(code_signing_blob), xml_len);
 +		return;
 +	}
 +	if (sweet_amfi_debug) {
 +		/* The test keys only exist in tools/mkinit.py test signatures. */
-+		printf("SWEET AMFI: %s: %u entitlements (test: bool %d string %d array %d)\n",
++		printf("TULIP AMFI: %s: %u entitlements (test: bool %d string %d array %d)\n",
 +		    csblob_get_identity(code_signing_blob), sweet_entitlements_count(ent),
 +		    sweet_entitlements_bool(ent, "com.apple.private.sweet.test-bool"),
 +		    sweet_entitlements_string(ent, "com.apple.private.sweet.test-string", "hello"),
@@ -231,8 +231,8 @@
  sweet_amfi_register(void)
  {
  	amfi_interface_register(&sweet_amfi);
--	printf("SWEET AMFI: built-in interface registered (no entitlements)\n");
-+	printf("SWEET AMFI: built-in interface registered (XML entitlements)\n");
+-	printf("TULIP AMFI: built-in interface registered (no entitlements)\n");
++	printf("TULIP AMFI: built-in interface registered (XML entitlements)\n");
  }
  STARTUP(EARLY_BOOT, STARTUP_RANK_MIDDLE, sweet_amfi_register);
 +
@@ -263,8 +263,8 @@
 +};
 +
 +static struct mac_policy_conf sweet_amfi_mac_conf = {
-+	.mpc_name = "SWEET AMFI",
-+	.mpc_fullname = "SWEET built-in Mobile File Integrity",
++	.mpc_name = "TULIP AMFI",
++	.mpc_fullname = "TULIP built-in Mobile File Integrity",
 +	.mpc_ops = &sweet_amfi_mac_ops,
 +};
 +
@@ -277,7 +277,7 @@
 +sweet_amfi_policy_register(void)
 +{
 +	int error = mac_policy_register(&sweet_amfi_mac_conf, &sweet_amfi_mac_handle, NULL);
-+	printf("SWEET AMFI: platform binary policy %s (%d)\n",
++	printf("TULIP AMFI: platform binary policy %s (%d)\n",
 +	    error ? "NOT registered" : "registered", error);
 +}
  #endif /* ARM64_BOARD_CONFIG_SWEET */

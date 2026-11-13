@@ -20724,7 +20724,7 @@
 +		ok = super::open(client, options, data);
 +	}
 +	OSSafeReleaseNULL(data);
-+	IOLog("SWEET HID: %s open by %s -> %d\n", getName(), client ? client->getName() : "?", ok);
++	IOLog("TULIP HID: %s open by %s -> %d\n", getName(), client ? client->getName() : "?", ok);
 +	return ok;
 +}
 +
@@ -20892,7 +20892,7 @@
 +	IOUserClient *client;
 +
 +	if (type != kIOHIDEventServiceUserClientType) {
-+		IOLog("SWEET HID: %s user client type 0x%x unsupported\n", getName(), (unsigned)type);
++		IOLog("TULIP HID: %s user client type 0x%x unsupported\n", getName(), (unsigned)type);
 +		return super::newUserClient(owningTask, securityID, type, properties, handler);
 +	}
 +	client = OSTypeAlloc(IOHIDEventServiceUserClient);
@@ -20901,7 +20901,7 @@
 +	}
 +	if (!client->initWithTask(owningTask, securityID, type)) {
 +		client->release();
-+		IOLog("SWEET HID: %s user client init refused\n", getName());
++		IOLog("TULIP HID: %s user client init refused\n", getName());
 +		return kIOReturnBadArgument;
 +	}
 +	if (!client->attach(this)) {
@@ -20978,7 +20978,7 @@
 +	}
 +	gSweetButtons = this;
 +	registerService();
-+	IOLog("SWEET HID: buttons registered (test every %u s)\n", fTestSecs);
++	IOLog("TULIP HID: buttons registered (test every %u s)\n", fTestSecs);
 +	return true;
 +}
 +
@@ -20988,7 +20988,7 @@
 +	IOHIDEvent *event = IOHIDEvent::keyboardEvent(mach_absolute_time(), kHIDPage_Consumer, usage, down);
 +
 +	if (event) {
-+		IOLog("SWEET HID: key 0x%x %s (%u clients)\n", (unsigned)usage, down ? "down" : "up",
++		IOLog("TULIP HID: key 0x%x %s (%u clients)\n", (unsigned)usage, down ? "down" : "up",
 +		    _clients ? _clients->getCount() : 0);
 +		dispatchEvent(event);
 +		event->release();
@@ -21024,7 +21024,7 @@
 +	setProperty("SurfaceHeight", (unsigned long long)(151 << 16), 32);
 +	gSweetTouch = this;
 +	registerService();
-+	IOLog("SWEET HID: touch registered\n");
++	IOLog("TULIP HID: touch registered\n");
 +	return true;
 +}
 +
@@ -21106,7 +21106,7 @@
 +	IOLockUnlock(fLock);
 +
 +	if (was != down) {
-+		IOLog("SWEET HID: touch %d %s at %d,%d\n", finger, down ? "down" : "up", x, y);
++		IOLog("TULIP HID: touch %d %s at %d,%d\n", finger, down ? "down" : "up", x, y);
 +	}
 +	dispatchEvent(collection);
 +	collection->release();

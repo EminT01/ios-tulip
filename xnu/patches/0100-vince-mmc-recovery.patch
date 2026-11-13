@@ -68,7 +68,7 @@ index 0300091..0e6c53c 100644
 +		}
 +		delay(1000);
 +	}
-+	printf("VINCE MMC: card stuck in state %d after an error\n", st);
++	printf("TULIP MMC: card stuck in state %d after an error\n", st);
 +	return EIO;
 +}
 +
@@ -82,7 +82,7 @@ index 0300091..0e6c53c 100644
 +	int error = mmc_read_once(lba, n);
 +	if (error && error != EINVAL && !mmc_resync()) {
 +		error = mmc_read_once(lba, n);
-+		printf("VINCE MMC: read retry at 0x%llx %s\n", lba, error ? "failed" : "ok");
++		printf("TULIP MMC: read retry at 0x%llx %s\n", lba, error ? "failed" : "ok");
 +	}
 +	return error;
 +}
@@ -93,7 +93,7 @@ index 0300091..0e6c53c 100644
 +	int error = mmc_write_once(rel, n);
 +	if (error && vm.rw && !mmc_resync()) {
 +		error = mmc_write_once(rel, n);
-+		printf("VINCE MMC: write retry at partition sector 0x%llx %s\n", rel, error ? "failed" : "ok");
++		printf("TULIP MMC: write retry at partition sector 0x%llx %s\n", rel, error ? "failed" : "ok");
 +	}
 +	return error;
 +}

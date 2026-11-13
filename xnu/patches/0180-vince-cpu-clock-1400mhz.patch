@@ -25,7 +25,7 @@ index bbaec29..ea033f3 100644
 +
  	vm_offset_t c0 = ml_io_map(0x0b111000, 0x1000), c1 = ml_io_map(0x0b011000, 0x1000);
  	if (!c0 || !c1) {
- 		IOLog("VINCE CLK: mux mapping failed\n");
+ 		IOLog("TULIP CLK: mux mapping failed\n");
  		return;
  	}
 +
@@ -33,7 +33,7 @@ index bbaec29..ea033f3 100644
  	volatile uint32_t *cmd1 = (volatile uint32_t *)(c1 + 0x50), *cfg1 = (volatile uint32_t *)(c1 + 0x54);
 -	uint32_t cfg0 = *(volatile uint32_t *)(c0 + 0x54), old = *cfg1;
 -	if (((old >> 8) & 7) != 0 || ((cfg0 >> 8) & 7) != 4) {
--		IOLog("VINCE CLK: cluster muxes c0 %#x c1 %#x, left alone\n", cfg0, old);
+-		IOLog("TULIP CLK: cluster muxes c0 %#x c1 %#x, left alone\n", cfg0, old);
 +
 +	if (target_mhz == 800) {
 +		/* Fallback: keep GPLL0 800 MHz, align cluster 1 to cluster 0 */
@@ -45,13 +45,13 @@ index bbaec29..ea033f3 100644
 +		while ((*cmd1 & 1) && i++ < 1000) {
 +			IODelay(1);
 +		}
-+		IOLog("VINCE CLK: clusters kept at GPLL0 800 MHz\n");
++		IOLog("TULIP CLK: clusters kept at GPLL0 800 MHz\n");
 +		return;
 +	}
 +
 +	vm_offset_t pll = ml_io_map(0x0b116000, 0x1000);
 +	if (!pll) {
-+		IOLog("VINCE CLK: PLL mapping failed\n");
++		IOLog("TULIP CLK: PLL mapping failed\n");
  		return;
  	}
 -	*cfg1 = cfg0;
@@ -84,9 +84,9 @@ index bbaec29..ea033f3 100644
 +	while ((*(volatile uint32_t *)(pll + 0x00) & (1U << 31)) == 0 && timeout--) {
  		IODelay(1);
  	}
--	IOLog("VINCE CLK: cluster 1 mux %#x -> %#x (as cluster 0)%s\n", old, *cfg1, (*cmd1 & 1) ? ", update stuck" : "");
+-	IOLog("TULIP CLK: cluster 1 mux %#x -> %#x (as cluster 0)%s\n", old, *cfg1, (*cmd1 & 1) ? ", update stuck" : "");
 +	if (timeout <= 0) {
-+		IOLog("VINCE CLK: APCS PLL lock failed: %#x\n", *(volatile uint32_t *)(pll + 0x00));
++		IOLog("TULIP CLK: APCS PLL lock failed: %#x\n", *(volatile uint32_t *)(pll + 0x00));
 +		return;
 +	}
 +	*(volatile uint32_t *)(pll + 0x00) = 0x7;        /* PLL_OUTCTRL */
@@ -111,7 +111,7 @@ index bbaec29..ea033f3 100644
 +		IODelay(1);
 +	}
 +
-+	IOLog("VINCE CLK: APCS PLL locked (L=%u), both clusters set to A53 PLL (0x501)\n", l_val);
++	IOLog("TULIP CLK: APCS PLL locked (L=%u), both clusters set to A53 PLL (0x501)\n", l_val);
  }
  static uint32_t gVinceBootRegistered;   /* the boot CPU finished processor_start */
  static uint32_t gVinceStarted;

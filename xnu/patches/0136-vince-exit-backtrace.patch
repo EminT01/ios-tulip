@@ -49,18 +49,18 @@ index a7c82f3..47a48ab 100755
  		break;
  	}
  	if (exit_entry) {
--		printf("VINCE TRC: %s exit(%d)\n", comm, (int)arg[0]);
+-		printf("TULIP TRC: %s exit(%d)\n", comm, (int)arg[0]);
 +		uint64_t fr[2];
 +		const uint64_t mask = 0x7fffffffffULL;
 +
-+		printf("VINCE TRC: %s exit(%d) pc %llx lr %llx\n", comm, (int)arg[0], pc & mask, lr & mask);
++		printf("TULIP TRC: %s exit(%d) pc %llx lr %llx\n", comm, (int)arg[0], pc & mask, lr & mask);
 +		for (int i = 0; i < 12 && fp != 0; i++) {
 +			if (copyin((user_addr_t)(fp & mask), fr, sizeof(fr)) != 0) {
 +				break;
 +			}
-+			printf("VINCE TRC:   frame %d ret %llx\n", i, fr[1] & mask);
++			printf("TULIP TRC:   frame %d ret %llx\n", i, fr[1] & mask);
 +			fp = fr[0];
 +		}
  	} else {
- 		printf("VINCE TRC: %s sc %d a0 %llx%s%s%s err %d ret %d\n", comm, code, arg[0],
+ 		printf("TULIP TRC: %s sc %d a0 %llx%s%s%s err %d ret %d\n", comm, code, arg[0],
  		    haspath ? " \"" : "", haspath ? path : "", haspath ? "\"" : "", error, ret);

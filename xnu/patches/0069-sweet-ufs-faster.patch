@@ -93,7 +93,7 @@
 +		uint64_t now = mach_absolute_time();
 +		if (now > deadline) {
  			ufs_wr(REG_UTRLCLR, ~1u);
- 			printf("SWEET UFS: command 0x%02x timed out\n", cdb[0]);
+ 			printf("TULIP UFS: command 0x%02x timed out\n", cdb[0]);
  			return ETIMEDOUT;
  		}
 -		delay(1);
@@ -160,7 +160,7 @@
  /* Called for all console output, any context: never blocks. */
  void sweet_log_append(const char *c, int size);
 @@ -658,7 +714,7 @@
- 	printf("SWEET LOG: console log to the last %u KiB of the partition (block 0x%llx)\n",
+ 	printf("TULIP LOG: console log to the last %u KiB of the partition (block 0x%llx)\n",
  	    SWEET_LOG_BLOCKS * UFS_BLOCK >> 10, base);
  	for (;;) {
 -		(void)tsleep(&sweet_log_chan, PZERO, "sweetlog", hz);

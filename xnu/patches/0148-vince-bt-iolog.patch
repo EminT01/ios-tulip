@@ -11,7 +11,7 @@ index 8ef4b6e..b82d741 100755
 +
 +			if (wlog < 400) {
 +				wlog++;
-+				printf("VINCE BT: write pipe %u count %u size %u -> status %#x written %u\n", dp[0], dp[1], size, status, written);
++				printf("TULIP BT: write pipe %u count %u size %u -> status %#x written %u\n", dp[0], dp[1], size, status, written);
 +			}
 +		}
  	}
@@ -30,7 +30,7 @@ index 8ef4b6e..b82d741 100755
 +		}
 +		if ((any || ret) && rlog < 400) {
 +			rlog++;
-+			printf("VINCE BT: read ret %d items %u (", ret, any);
++			printf("TULIP BT: read ret %d items %u (", ret, any);
 +			for (uint32_t i = 0; i < n; i++) {
 +				printf("%s%u:%u", i ? " " : "", dd[i].pipe, dd[i].cnt);
 +			}

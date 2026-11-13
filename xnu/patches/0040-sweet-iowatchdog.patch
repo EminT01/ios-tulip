@@ -60,7 +60,7 @@
 +	}
 +	setProperty(kIOUserClientClassKey, "IOWatchdogUserClient");
 +	registerService();
-+	IOLog("SWEET WDT: IOWatchdog registered (accepts check-ins, never fires)\n");
++	IOLog("TULIP WDT: IOWatchdog registered (accepts check-ins, never fires)\n");
 +	return true;
 +}
 +
@@ -109,7 +109,7 @@
 +		}
 +		char name[32];
 +		proc_selfname(name, sizeof(name));
-+		IOLog("SWEET WDT: %s sel %u in %u/%u out %u/%u -> ok\n", name, selector,
++		IOLog("TULIP WDT: %s sel %u in %u/%u out %u/%u -> ok\n", name, selector,
 +		    args->scalarInputCount, args->structureInputSize,
 +		    args->scalarOutputCount, args->structureOutputSize);
 +	}

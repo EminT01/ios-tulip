@@ -18,7 +18,7 @@ index fa66eef..85a4519 100755
 +	}
 +	n++;
 +	et = (uint16_t)(eth[12] << 8 | eth[13]);
-+	printf("VINCE PKT: %s %u dst %02x:%02x:%02x:%02x:%02x:%02x src %02x:%02x:%02x:%02x:%02x:%02x type %04x", dir, len,
++	printf("TULIP PKT: %s %u dst %02x:%02x:%02x:%02x:%02x:%02x src %02x:%02x:%02x:%02x:%02x:%02x type %04x", dir, len,
 +	    eth[0], eth[1], eth[2], eth[3], eth[4], eth[5], eth[6], eth[7], eth[8], eth[9], eth[10], eth[11], et);
 +	if (et == 0x0800 && len >= 14 + 20) {
 +		const uint8_t *ip = eth + 14;

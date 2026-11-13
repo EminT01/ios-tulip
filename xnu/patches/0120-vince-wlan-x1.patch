@@ -114,29 +114,29 @@ index 4fb6bd7..2ade42c 100644
  	}
 -	if (!vs_find("APPS_RIVA_BT_CMD", &c)) {
 +	if (!vince_smd_find("APPS_RIVA_BT_CMD", &c)) {
- 		printf("VINCE SMD: no APPS_RIVA_BT_CMD channel (Pronto not started by the shim?)\n");
+ 		printf("TULIP SMD: no APPS_RIVA_BT_CMD channel (Pronto not started by the shim?)\n");
  		goto out;
  	}
- 	printf("VINCE SMD: BT_CMD info %#lx fifo %#lx half %#x remote state %u\n",
+ 	printf("TULIP SMD: BT_CMD info %#lx fifo %#lx half %#x remote state %u\n",
  	    (unsigned long)(c.info - smem), (unsigned long)(c.fifo - smem), c.half, rd32(c.info + I_HALF + I_STATE));
 -	r = vs_open(&c);
 +	r = vince_smd_open(&c);
  	if (r) {
- 		printf("VINCE SMD: open BT_CMD failed %d (tx %u rx %u)\n", r, rd32(c.info + I_STATE),
+ 		printf("TULIP SMD: open BT_CMD failed %d (tx %u rx %u)\n", r, rd32(c.info + I_STATE),
  		    rd32(c.info + I_HALF + I_STATE));
  		goto out;
  	}
- 	printf("VINCE SMD: BT_CMD open (tx %u rx %u)\n", rd32(c.info + I_STATE), rd32(c.info + I_HALF + I_STATE));
+ 	printf("TULIP SMD: BT_CMD open (tx %u rx %u)\n", rd32(c.info + I_STATE), rd32(c.info + I_HALF + I_STATE));
 -	r = vs_send(&c, req, sizeof(req));
 +	r = vince_smd_send(&c, req, sizeof(req));
  	if (r) {
- 		printf("VINCE SMD: HCI Reset not sent %d\n", r);
+ 		printf("TULIP SMD: HCI Reset not sent %d\n", r);
  		goto out;
  	}
 -	r = vs_recv(&c, buf, sizeof(buf), 3000);
 +	r = vince_smd_recv(&c, buf, sizeof(buf), 3000);
  	if (r == 6 && buf[0] == 0x0e && buf[3] == 0x03 && buf[4] == 0x0c) {      /* Command Complete for opcode 0x0c03 */
- 		printf("VINCE SMD: HCI Reset answered, status %u\n", buf[5]);
+ 		printf("TULIP SMD: HCI Reset answered, status %u\n", buf[5]);
  	} else {
 @@ -404,6 +400,18 @@ out:
  	thread_block(THREAD_CONTINUE_NULL);
@@ -167,20 +167,20 @@ index 4fb6bd7..2ade42c 100644
 -	smem = ml_io_map(SMEM_PA, SMEM_SIZE);
 -	apcs = ml_io_map(APCS_PA, 0x1000);
 -	if (!smem || !apcs) {
--		printf("VINCE SMD: mapping failed\n");
+-		printf("TULIP SMD: mapping failed\n");
 -		return;
 -	}
 -	if (kernel_thread_start(smd_thread, NULL, &thread) == KERN_SUCCESS) {
 -		thread_deallocate(thread);
 -	} else {
--		printf("VINCE SMD: thread not started\n");
+-		printf("TULIP SMD: thread not started\n");
 +	if (on) {
 +		if (!vince_smd_map()) {
-+			printf("VINCE SMD: mapping failed\n");
++			printf("TULIP SMD: mapping failed\n");
 +		} else if (kernel_thread_start(smd_thread, NULL, &thread) == KERN_SUCCESS) {
 +			thread_deallocate(thread);
 +		} else {
-+			printf("VINCE SMD: thread not started\n");
++			printf("TULIP SMD: thread not started\n");
 +		}
  	}
 +	vince_wlan_start();
@@ -233,7 +233,7 @@ index 0000000..7efd090
 + * Message layout from mainline drivers/net/wireless/ath/wcn36xx (hal.h, smd.c; GPL-2.0): every HAL message starts
 + * with { u16 type, u16 version, u32 total length }, little endian, and the firmware answers type + 1.
 + *
-+ * Boot-arg: vincewlan=1 turns it on (default off). Log lines start with "VINCE WLAN:" (tools/xnulog.py --con).
++ * Boot-arg: vincewlan=1 turns it on (default off). Log lines start with "TULIP WLAN:" (tools/xnulog.py --con).
 + */
 +#if defined(ARM64_BOARD_CONFIG_VINCE)
 +#include <sys/param.h>
@@ -331,7 +331,7 @@ index 0000000..7efd090
 +		if (n >= 8 && vw_get16(vw_rsp) == want) {
 +			return n;
 +		}
-+		printf("VINCE WLAN: skipped indication type %u len %d\n", vw_get16(vw_rsp), n);
++		printf("TULIP WLAN: skipped indication type %u len %d\n", vw_get16(vw_rsp), n);
 +	}
 +	return -5;
 +}
@@ -345,7 +345,7 @@ index 0000000..7efd090
 +		t[i] = (s[i] >= 0x20 && s[i] < 0x7f) ? (char)s[i] : 0;
 +	}
 +	t[HAL_VERSION_LEN] = 0;
-+	printf("VINCE WLAN: %s \"%s\"\n", what, t);
++	printf("TULIP WLAN: %s \"%s\"\n", what, t);
 +}
 +
 +/* HAL_START_REQ with the stock config table; 0 when the firmware answers status 0 */
@@ -368,14 +368,14 @@ index 0000000..7efd090
 +	vw_put32(vw_req + 12, len - 16);
 +	n = vw_xfer(len, HAL_START_RSP);
 +	if (n < 0) {
-+		printf("VINCE WLAN: HAL_START failed %d\n", n);
++		printf("TULIP WLAN: HAL_START failed %d\n", n);
 +		return n;
 +	}
 +	if (n < 16) {
-+		printf("VINCE WLAN: HAL_START answer too short (%d)\n", n);
++		printf("TULIP WLAN: HAL_START answer too short (%d)\n", n);
 +		return -6;
 +	}
-+	printf("VINCE WLAN: HAL_START status %u, stations %u, bssids %u, api %u.%u.%u.%u (answer %d bytes)\n",
++	printf("TULIP WLAN: HAL_START status %u, stations %u, bssids %u, api %u.%u.%u.%u (answer %d bytes)\n",
 +	    vw_get16(vw_rsp + 8), vw_rsp[10], vw_rsp[11], vw_rsp[12], vw_rsp[13], vw_rsp[14], vw_rsp[15], n);
 +	if (n >= 16 + 2 * HAL_VERSION_LEN) {
 +		vw_log_name("crm", vw_rsp + 16);
@@ -397,10 +397,10 @@ index 0000000..7efd090
 +	vw_put32(vw_req + 8 + 4 * (FEAT_STA_POWERSAVE / 32), 1u << (FEAT_STA_POWERSAVE % 32));
 +	n = vw_xfer(24, HAL_FEATURE_CAPS_RSP);
 +	if (n != 24) {
-+		printf("VINCE WLAN: FEATURE_CAPS failed %d\n", n);
++		printf("TULIP WLAN: FEATURE_CAPS failed %d\n", n);
 +		return n < 0 ? n : -6;
 +	}
-+	printf("VINCE WLAN: caps %08x %08x %08x %08x\n", vw_get32(vw_rsp + 8), vw_get32(vw_rsp + 12),
++	printf("TULIP WLAN: caps %08x %08x %08x %08x\n", vw_get32(vw_rsp + 8), vw_get32(vw_rsp + 12),
 +	    vw_get32(vw_rsp + 16), vw_get32(vw_rsp + 20));
 +	return 0;
 +}
@@ -416,19 +416,19 @@ index 0000000..7efd090
 +		vince_smd_sleep(250);
 +	}
 +	if (!vince_smd_find("WLAN_CTRL", &vw_ch)) {
-+		printf("VINCE WLAN: no WLAN_CTRL channel (Pronto not started by the shim?)\n");
++		printf("TULIP WLAN: no WLAN_CTRL channel (Pronto not started by the shim?)\n");
 +		goto out;
 +	}
 +	for (int i = 0; i < 10 && (r = vw_open()) != 0; i++) {
 +		vince_smd_sleep(500);
 +	}
 +	if (r) {
-+		printf("VINCE WLAN: WLAN_CTRL open failed %d\n", r);
++		printf("TULIP WLAN: WLAN_CTRL open failed %d\n", r);
 +		goto out;
 +	}
-+	printf("VINCE WLAN: WLAN_CTRL open\n");
++	printf("TULIP WLAN: WLAN_CTRL open\n");
 +	if (vw_start() == 0 && vw_caps() == 0) {
-+		printf("VINCE WLAN: X1 done, HAL is up\n");
++		printf("TULIP WLAN: X1 done, HAL is up\n");
 +	}
 +out:
 +	(void)thread_terminate(current_thread());
@@ -450,13 +450,13 @@ index 0000000..7efd090
 +		return;
 +	}
 +	if (!vince_smd_map()) {
-+		printf("VINCE WLAN: mapping failed\n");
++		printf("TULIP WLAN: mapping failed\n");
 +		return;
 +	}
 +	if (kernel_thread_start(vw_thread, NULL, &thread) == KERN_SUCCESS) {
 +		thread_deallocate(thread);
 +	} else {
-+		printf("VINCE WLAN: thread not started\n");
++		printf("TULIP WLAN: thread not started\n");
 +	}
 +}
 +#endif /* ARM64_BOARD_CONFIG_VINCE */

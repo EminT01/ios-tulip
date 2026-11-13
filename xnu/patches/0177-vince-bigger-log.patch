@@ -18,7 +18,7 @@ index 0f48af9..1db9539 100755
 -			if (wlog < 400) {
 +			if (wlog < 50000) {
  				wlog++;
- 				printf("VINCE BT: write pipe %u count %u size %u -> status %#x written %u\n", dp[0], dp[1], size, status, written);
+ 				printf("TULIP BT: write pipe %u count %u size %u -> status %#x written %u\n", dp[0], dp[1], size, status, written);
  			}
 @@ -677,7 +677,7 @@ vince_bt_hci_read(const uint8_t *d, uint32_t n, uint8_t *out)
  		for (uint32_t i = 0; i < n; i++) {
@@ -27,7 +27,7 @@ index 0f48af9..1db9539 100755
 -		if ((any || ret) && rlog < 400) {
 +		if ((any || ret) && rlog < 50000) {
  			rlog++;
- 			printf("VINCE BT: read ret %d items %u (", ret, any);
+ 			printf("TULIP BT: read ret %d items %u (", ret, any);
  			for (uint32_t i = 0; i < n; i++) {
 diff --git a/bsd/dev/vince_wlan_if.c b/bsd/dev/vince_wlan_if.c
 index ddba943..877eb67 100755

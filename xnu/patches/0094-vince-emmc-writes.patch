@@ -47,7 +47,7 @@ index 6ae8a1a..e4d18e7 100644
 +	uint64_t lba = vm.first + rel;
 +	if (!vm.rw || n == 0 || n > MAX_SECTORS || rel >= vm.nsect || n > vm.nsect - rel ||
 +	    lba < vm.first || lba + n > vm.first + vm.nsect || lba + n > UINT32_MAX) {
-+		printf("VINCE MMC: refused write of %u sectors at partition sector 0x%llx\n", n, rel);
++		printf("TULIP MMC: refused write of %u sectors at partition sector 0x%llx\n", n, rel);
 +		return EIO;
 +	}
 +	uint32_t xm = XM_BLKCNT | (n > 1 ? XM_MULTI | XM_ACMD12 : 0);
@@ -67,7 +67,7 @@ index 6ae8a1a..e4d18e7 100644
 +		error = wait_int(INT_XFER, 5000);       /* programming busy of the last block (and auto CMD12) */
 +	}
 +	if (error) {
-+		printf("VINCE MMC: write of %u sectors at 0x%llx failed (status 0x%08x)\n", n, lba, vm.err);
++		printf("TULIP MMC: write of %u sectors at 0x%llx failed (status 0x%08x)\n", n, lba, vm.err);
 +		recover();
 +	}
 +	return error;
@@ -93,14 +93,14 @@ index 6ae8a1a..e4d18e7 100644
 +	}
 +	const uint8_t *vh = (const uint8_t *)vince_mmc_bounce;
 +	if (!((vh[0] == 'H' && vh[1] == '+') || (vh[0] == 'H' && vh[1] == 'X'))) {
-+		printf("VINCE MMC: no HFS+ volume header, no write self-test\n");
++		printf("TULIP MMC: no HFS+ volume header, no write self-test\n");
 +		return ENXIO;
 +	}
 +	uint32_t bsz = (uint32_t)vh[40] << 24 | (uint32_t)vh[41] << 16 | (uint32_t)vh[42] << 8 | vh[43];
 +	uint32_t blocks = (uint32_t)vh[44] << 24 | (uint32_t)vh[45] << 16 | (uint32_t)vh[46] << 8 | vh[47];
 +	uint64_t test = (uint64_t)bsz * blocks / SECTOR + 2048;
 +	if (bsz < SECTOR || test + 1 > vm.nsect) {
-+		printf("VINCE MMC: no free sector past the volume (block %u x %u), no write self-test\n", bsz, blocks);
++		printf("TULIP MMC: no free sector past the volume (block %u x %u), no write self-test\n", bsz, blocks);
 +		return ENOSPC;
 +	}
 +	static uint32_t saved[SECTOR / 4];
@@ -117,7 +117,7 @@ index 6ae8a1a..e4d18e7 100644
 +	}
 +	for (uint32_t i = 0; !error && i < SECTOR / 4; i++) {
 +		if (vince_mmc_bounce[i] != (0x56494e43u ^ (i * 0x9e3779b9u))) {
-+			printf("VINCE MMC: write self-test read back word %u = 0x%08x\n", i, vince_mmc_bounce[i]);
++			printf("TULIP MMC: write self-test read back word %u = 0x%08x\n", i, vince_mmc_bounce[i]);
 +			error = EIO;
 +		}
 +	}
@@ -125,7 +125,7 @@ index 6ae8a1a..e4d18e7 100644
 +	if (mmc_write_sectors(test, 1) && !error) {
 +		error = EIO;
 +	}
-+	printf("VINCE MMC: write self-test at partition sector 0x%llx: %s\n", test, error ? "FAILED" : "ok");
++	printf("TULIP MMC: write self-test at partition sector 0x%llx: %s\n", test, error ? "FAILED" : "ok");
 +	return error;
 +}
 +
@@ -223,7 +223,7 @@ index 6ae8a1a..e4d18e7 100644
 +	int want_rw = 0;
 +	if (!error && PE_parse_boot_argn("mmcrw", &want_rw, sizeof(want_rw)) && want_rw) {
 +		if (strcmp(want, "userdata") != 0) {
-+			printf("VINCE MMC: mmcrw=1 is only allowed for \"userdata\", not \"%s\"\n", want);
++			printf("TULIP MMC: mmcrw=1 is only allowed for \"userdata\", not \"%s\"\n", want);
 +		} else {
 +			vm.rw = true;
 +			if (mmc_write_selftest()) {
@@ -233,14 +233,14 @@ index 6ae8a1a..e4d18e7 100644
 +	}
  	lck_mtx_unlock(&vince_mmc_lock);
  	if (error) {
- 		printf("VINCE MMC: eMMC root unavailable: %d (LK's last command CMD%u)\n", error, lk_cmd);
+ 		printf("TULIP MMC: eMMC root unavailable: %d (LK's last command CMD%u)\n", error, lk_cmd);
 @@ -701,8 +825,8 @@ vince_mmc_init(void)
  	devfs_make_node(vm.bdev, DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0640, "mmcroot0");
  	devfs_make_node(makedev(vm.cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0640, "rmmcroot0");
  	vm.ready = true;
--	printf("VINCE MMC: \"%s\" at sector 0x%llx, %llu MiB, %s, read-only (8-bit HS 50 MHz, PIO)\n",
+-	printf("TULIP MMC: \"%s\" at sector 0x%llx, %llu MiB, %s, read-only (8-bit HS 50 MHz, PIO)\n",
 -	    want, vm.first, vm.nsect * SECTOR >> 20, fs);
-+	printf("VINCE MMC: \"%s\" at sector 0x%llx, %llu MiB, %s, %s (8-bit HS 50 MHz, PIO)\n",
++	printf("TULIP MMC: \"%s\" at sector 0x%llx, %llu MiB, %s, %s (8-bit HS 50 MHz, PIO)\n",
 +	    want, vm.first, vm.nsect * SECTOR >> 20, fs, vm.rw ? "read-write" : "read-only");
  	return 0;
  }

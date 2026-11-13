@@ -23,7 +23,7 @@
 +		sweet_sandbox_seen |= 1ULL << call;
 +		char name[32];
 +		proc_name(proc_pid(p), name, sizeof(name));
-+		printf("SWEET Sandbox: %s op %d\n", name, call);
++		printf("TULIP Sandbox: %s op %d\n", name, call);
 +	}
 +	switch (call) {
 +	case 4:         /* container path (audit token / pid) */
@@ -46,21 +46,21 @@
 +
 +static struct mac_policy_conf sweet_sandbox_mac_conf = {
 +	.mpc_name = "Sandbox",
-+	.mpc_fullname = "SWEET permissive sandbox stand-in",
++	.mpc_fullname = "TULIP permissive sandbox stand-in",
 +	.mpc_ops = &sweet_sandbox_mac_ops,
 +};
 +
 +static mac_policy_handle_t sweet_sandbox_mac_handle;
 +
  static struct mac_policy_conf sweet_amfi_mac_conf = {
- 	.mpc_name = "SWEET AMFI",
- 	.mpc_fullname = "SWEET built-in Mobile File Integrity",
+ 	.mpc_name = "TULIP AMFI",
+ 	.mpc_fullname = "TULIP built-in Mobile File Integrity",
 @@ -293,5 +337,8 @@
  	int error = mac_policy_register(&sweet_amfi_mac_conf, &sweet_amfi_mac_handle, NULL);
- 	printf("SWEET AMFI: platform binary policy %s (%d)\n",
+ 	printf("TULIP AMFI: platform binary policy %s (%d)\n",
  	    error ? "NOT registered" : "registered", error);
 +	error = mac_policy_register(&sweet_sandbox_mac_conf, &sweet_sandbox_mac_handle, NULL);
-+	printf("SWEET Sandbox: permissive policy %s (%d)\n",
++	printf("TULIP Sandbox: permissive policy %s (%d)\n",
 +	    error ? "NOT registered" : "registered", error);
  }
  #endif /* ARM64_BOARD_CONFIG_SWEET */

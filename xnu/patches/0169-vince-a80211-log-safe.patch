@@ -8,14 +8,14 @@ index d255316..ddba943 100755
  
 -			if (!a80211_assoc_dumped) {
 -				a80211_assoc_dumped = true;
--				printf("VINCE A80211: ASSOCIATE data (%u bytes), first 96:", len);
+-				printf("TULIP A80211: ASSOCIATE data (%u bytes), first 96:", len);
 -				for (uint32_t i = 0; i < len && i < 96; i++) {
 -					printf("%s%02x", i % 16 ? " " : "\n  ", kb[i]);
 -				}
 -				printf("\n  ssid_len %u key_len %u cipher %u auth %u/%u\n", sl, kl, ct, kb[6] | kb[7] << 8, kb[8] | kb[9] << 8);
 -			}
 +			a80211_assoc_dumped = true;
-+			printf("VINCE A80211: ASSOCIATE %u bytes: ssid_len %u key_len %u cipher %u auth %u/%u\n", len, sl, kl, ct,
++			printf("TULIP A80211: ASSOCIATE %u bytes: ssid_len %u key_len %u cipher %u auth %u/%u\n", len, sl, kl, ct,
 +			    kb[6] | kb[7] << 8, kb[8] | kb[9] << 8);
  			bzero(&a, sizeof(a));
  			if (sl == 0 || sl > 32) {

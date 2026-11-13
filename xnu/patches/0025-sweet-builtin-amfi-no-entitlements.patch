@@ -56,7 +56,7 @@ new file mode 100644
 +    __unused uint8_t cdhash[CS_CDHASH_LEN], __unused CEQuery_t query,
 +    __unused size_t query_length)
 +{
-+	panic("SWEET AMFI: CoreEntitlements queries are not implemented");
++	panic("TULIP AMFI: CoreEntitlements queries are not implemented");
 +}
 +
 +static bool
@@ -89,7 +89,7 @@ new file mode 100644
 +static void *
 +sweet_amfi_query_context_to_object(__unused CEQueryContext_t ctx)
 +{
-+	panic("SWEET AMFI: CoreEntitlements query contexts are not implemented");
++	panic("TULIP AMFI: CoreEntitlements query contexts are not implemented");
 +}
 +
 +static kern_return_t
@@ -186,7 +186,7 @@ new file mode 100644
 +sweet_amfi_register(void)
 +{
 +	amfi_interface_register(&sweet_amfi);
-+	printf("SWEET AMFI: built-in interface registered (no entitlements)\n");
++	printf("TULIP AMFI: built-in interface registered (no entitlements)\n");
 +}
 +STARTUP(EARLY_BOOT, STARTUP_RANK_MIDDLE, sweet_amfi_register);
 +#endif /* ARM64_BOARD_CONFIG_SWEET */

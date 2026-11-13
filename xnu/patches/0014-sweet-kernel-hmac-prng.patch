@@ -37,7 +37,7 @@ diff --git a/osfmk/prng/prng_random.c b/osfmk/prng/prng_random.c
 +sweet_prng_check(int status)
 +{
 +	if (status != CCDRBG_STATUS_OK) {
-+		panic("SWEET HMAC DRBG error %d", status);
++		panic("TULIP HMAC DRBG error %d", status);
 +	}
 +}
 +
@@ -96,7 +96,7 @@ diff --git a/osfmk/prng/prng_random.c b/osfmk/prng/prng_random.c
 +	size_t nbytes = sizeof(entropy);
 +	int32_t nsamples = sweet_getentropy(&nbytes, entropy, sweet_getentropy_arg);
 +	if (nsamples < 0) {
-+		panic("SWEET PRNG entropy health test failed");
++		panic("TULIP PRNG entropy health test failed");
 +	}
 +	if (nsamples >= 256) {
 +		assert(nbytes >= SEED_SIZE && nbytes <= sizeof(entropy));
@@ -134,7 +134,7 @@ diff --git a/osfmk/prng/prng_random.c b/osfmk/prng/prng_random.c
 +		.init_with_getentropy = sweet_prng_init_with_getentropy,
 +	};
 +	register_and_init_prng(&sweet_prng_ctx, &funcs);
-+	kprintf("SWEET PRNG: HMAC-SHA256 registered\n");
++	kprintf("TULIP PRNG: HMAC-SHA256 registered\n");
 +}
 +STARTUP(EARLY_BOOT, STARTUP_RANK_FIRST, sweet_prng_startup);
 +#endif /* SWEET */

@@ -6,9 +6,9 @@ index b2a91f6..1e4b8b1 100755
  	}
  leave:
  	vwpa_stop();
--	printf("VINCE WLAN: leave %d\n", va_leave(&ap));
-+	printf("VINCE WLAN: leave %d\n", va_leave(&ap, 1));
- 	printf("VINCE WLAN: X3 done\n");
+-	printf("TULIP WLAN: leave %d\n", va_leave(&ap));
++	printf("TULIP WLAN: leave %d\n", va_leave(&ap, 1));
+ 	printf("TULIP WLAN: X3 done\n");
  }
  
 +/* ---- X5: a station that stays connected (boot-args vincessid, vincepass, vincerun, vincecycle, vincelease) ---- */
@@ -36,7 +36,7 @@ index b2a91f6..1e4b8b1 100755
 +	uint64_t end;
 +
 +	if (!PE_parse_boot_argn("vincessid", ssid, sizeof(ssid)) || !PE_parse_boot_argn("vincepass", pass, sizeof(pass))) {
-+		printf("VINCE WLAN: vincessid / vincepass boot-args missing, stopping after the scan\n");
++		printf("TULIP WLAN: vincessid / vincepass boot-args missing, stopping after the scan\n");
 +		return;
 +	}
 +	(void)PE_parse_boot_argn("vincerun", &run_s, sizeof(run_s));
@@ -52,12 +52,12 @@ index b2a91f6..1e4b8b1 100755
 +		}
 +	}
 +	if (!hit) {
-+		printf("VINCE WLAN: \"%s\" is not in the scan table\n", ssid);
++		printf("TULIP WLAN: \"%s\" is not in the scan table\n", ssid);
 +		return;
 +	}
 +	ap = *hit;
 +	end = vd_now_us() + (uint64_t)run_s * 1000000ULL;
-+	printf("VINCE WLAN: station \"%s\" ch %u, run %d s, forced cycle %d s, lease override %d s\n", ap.ssid, ap.ch, run_s,
++	printf("TULIP WLAN: station \"%s\" ch %u, run %d s, forced cycle %d s, lease override %d s\n", ap.ssid, ap.ch, run_s,
 +	    cycle_s, lease_s);
 +	vif_start_ping((uint32_t)run_s / 5, 5000);
 +	while (vd_now_us() < end) {
@@ -70,21 +70,21 @@ index b2a91f6..1e4b8b1 100755
 +		vw_log_assoc(&ar);
 +		if (r) {
 +			if (vw_hal_dead(ar.step, ar.err)) {
-+				printf("VINCE WLAN: the firmware stopped answering HAL requests (step %d): Wi-Fi needs a Pronto restart\n", ar.step);
++				printf("TULIP WLAN: the firmware stopped answering HAL requests (step %d): Wi-Fi needs a Pronto restart\n", ar.step);
 +				break;
 +			}
 +		} else {
 +			r = vwpa_handshake(&ap, pass, pl, &wr);
-+			printf("VINCE WLAN: handshake %s at step %d (%s) err %d, gtk id %u\n", r ? "FAILED" : "done", wr.step,
++			printf("TULIP WLAN: handshake %s at step %d (%s) err %d, gtk id %u\n", r ? "FAILED" : "done", wr.step,
 +			    vwpa_step_name(wr.step), wr.err, wr.gtk_id);
 +			if (r && vw_hal_dead(wr.step, wr.err)) {
-+				printf("VINCE WLAN: the firmware stopped answering HAL requests: Wi-Fi needs a Pronto restart\n");
++				printf("TULIP WLAN: the firmware stopped answering HAL requests: Wi-Fi needs a Pronto restart\n");
 +				break;
 +			}
 +			if (!r) {
 +				r = vn_dhcp();
 +				if (r) {
-+					printf("VINCE WLAN: DHCP failed, step %d\n", r);
++					printf("TULIP WLAN: DHCP failed, step %d\n", r);
 +				}
 +			}
 +		}
@@ -94,14 +94,14 @@ index b2a91f6..1e4b8b1 100755
 +			vwpa_stop();
 +			(void)va_leave(&ap, 1);
 +			vn_link_reset();
-+			printf("VINCE WLAN: reconnect attempt %d failed, waiting %u s\n", attempt + 1, backoff);
++			printf("TULIP WLAN: reconnect attempt %d failed, waiting %u s\n", attempt + 1, backoff);
 +			attempt++;
 +			vince_smd_sleep(backoff * 1000);
 +			continue;
 +		}
 +		attempt = 0;
 +		c = vn_get_cfg();
-+		printf("VINCE WLAN: DHCP lease ip %u.%u.%u.%u gw %u.%u.%u.%u lease %u s\n", c->ip[0], c->ip[1], c->ip[2], c->ip[3],
++		printf("TULIP WLAN: DHCP lease ip %u.%u.%u.%u gw %u.%u.%u.%u lease %u s\n", c->ip[0], c->ip[1], c->ip[2], c->ip[3],
 +		    c->gw[0], c->gw[1], c->gw[2], c->gw[3], c->lease);
 +		if (vif_up(c)) {
 +			break;
@@ -119,10 +119,10 @@ index b2a91f6..1e4b8b1 100755
 +			}
 +			(void)vif_up(vif_current_cfg());
 +		}
-+		printf("VINCE WLAN: serve ended: %s\n", why >= 1 && why <= 5 ? why_names[why] : why_names[0]);
++		printf("TULIP WLAN: serve ended: %s\n", why >= 1 && why <= 5 ? why_names[why] : why_names[0]);
 +		vif_down();
 +		vwpa_stop();
-+		printf("VINCE WLAN: leave %d\n", va_leave(&ap, 1));
++		printf("TULIP WLAN: leave %d\n", va_leave(&ap, 1));
 +		vn_link_reset();
 +		if (why == VIF_END_TIME) {
 +			break;
@@ -133,16 +133,16 @@ index b2a91f6..1e4b8b1 100755
 +	bzero(pass, sizeof(pass));
 +	vif_stop_ping();
 +	vince_smd_sleep(6000);
-+	printf("VINCE WLAN: station done after %d reconnect cycles\n", cycles);
++	printf("TULIP WLAN: station done after %d reconnect cycles\n", cycles);
 +}
 +
  static void
  vw_thread(void *arg, wait_result_t w)
  {
 @@ -571,7 +696,9 @@ vw_thread(void *arg, wait_result_t w)
- 	printf("VINCE WLAN: X1 done, HAL is up\n");
+ 	printf("TULIP WLAN: X1 done, HAL is up\n");
  	if (stage >= 2 && vw_scan_all() == 0) {
- 		printf("VINCE WLAN: X2 done\n");
+ 		printf("TULIP WLAN: X2 done\n");
 -		if (stage >= 3) {
 +		if (stage >= 5) {
 +			vw_station();
@@ -341,7 +341,7 @@ index 8fe5c22..5b45916 100755
 +	sin->sin_len = sizeof(struct sockaddr_in);
 +	sin->sin_family = AF_INET;
 +	bcopy(vif_addr, &sin->sin_addr, 4);
-+	printf("VINCE WLAN: remove address %u.%u.%u.%u: %d\n", vif_addr[0], vif_addr[1], vif_addr[2], vif_addr[3],
++	printf("TULIP WLAN: remove address %u.%u.%u.%u: %d\n", vif_addr[0], vif_addr[1], vif_addr[2], vif_addr[3],
 +	    in_control(NULL, SIOCDIFADDR, (caddr_t)&ifr, vif_ifp, kernproc));
 +	vif_have_addr = false;
 +}
@@ -357,7 +357,7 @@ index 8fe5c22..5b45916 100755
 +	bcopy(c->ip, vif_addr, 4);
  	ifnet_set_flags(vif_ifp, IFF_UP | IFF_RUNNING, IFF_UP | IFF_RUNNING);
  	err = vif_route_default(c->gw);
- 	printf("VINCE WLAN: default route via %u.%u.%u.%u: %d\n", c->gw[0], c->gw[1], c->gw[2], c->gw[3], err);
+ 	printf("TULIP WLAN: default route via %u.%u.%u.%u: %d\n", c->gw[0], c->gw[1], c->gw[2], c->gw[3], err);
 @@ -315,24 +342,96 @@ vif_input(const uint8_t dst[6], const uint8_t src[6], uint16_t etype, const uint
  	ifnet_input(vif_ifp, m, &stats);
  }
@@ -412,7 +412,7 @@ index 8fe5c22..5b45916 100755
 +				bool same = bcmp(nc->ip, old.ip, 4) == 0 && bcmp(nc->gw, old.gw, 4) == 0 &&
 +				    bcmp(nc->mask, old.mask, 4) == 0;
 +
-+				printf("VINCE WLAN: lease renewed (%u s)%s\n", nc->lease, same ? "" : ", address changed");
++				printf("TULIP WLAN: lease renewed (%u s)%s\n", nc->lease, same ? "" : ", address changed");
 +				vif_cfg = *nc;
 +				lease = nc->lease ? nc->lease : 3600;
 +				renew_fail = 0;
@@ -423,7 +423,7 @@ index 8fe5c22..5b45916 100755
 +			} else {
 +				vn_set_cfg(&old);
 +				renew_fail++;
-+				printf("VINCE WLAN: lease renewal failed (step %d), try %d\n", r, renew_fail);
++				printf("TULIP WLAN: lease renewal failed (step %d), try %d\n", r, renew_fail);
 +				t1 = vd_now_us() + 15000000ULL;
 +				if (renew_fail >= 8) {
 +					return VIF_END_DEAD;
@@ -436,7 +436,7 @@ index 8fe5c22..5b45916 100755
 +				ka_fail = 0;
 +				vif_last_rx_us = vd_now_us();
 +			} else if (++ka_fail >= 3) {
-+				printf("VINCE WLAN: keep-alive: gateway silent three times\n");
++				printf("TULIP WLAN: keep-alive: gateway silent three times\n");
 +				return VIF_END_DEAD;
 +			}
 +		}
@@ -445,7 +445,7 @@ index 8fe5c22..5b45916 100755
 +
 +			next_stat += 60000000ULL;
 +			if (ifnet_stat(vif_ifp, &st) == 0) {
-+				printf("VINCE WLAN: %llu s: in %llu out %llu errors %llu/%llu\n", (unsigned long long)((now - t0) / 1000000),
++				printf("TULIP WLAN: %llu s: in %llu out %llu errors %llu/%llu\n", (unsigned long long)((now - t0) / 1000000),
 +				    (unsigned long long)st.packets_in, (unsigned long long)st.packets_out,
 +				    (unsigned long long)st.errors_in, (unsigned long long)st.errors_out);
 +			}
@@ -503,8 +503,8 @@ index 8fe5c22..5b45916 100755
 +		sent_n++;
  		err = sock_send(so, &msg, 0, &sent);
  		if (err) {
--			printf("VINCE WLAN: kernel ping %d: send failed %d\n", i, err);
-+			printf("VINCE WLAN: kernel ping %u: send failed %d\n", i, err);
+-			printf("TULIP WLAN: kernel ping %d: send failed %d\n", i, err);
++			printf("TULIP WLAN: kernel ping %u: send failed %d\n", i, err);
  			fail++;
  		} else {
  			int good = 0;
@@ -512,19 +512,19 @@ index 8fe5c22..5b45916 100755
  			}
  			if (good) {
  				ok++;
--				printf("VINCE WLAN: kernel ping %d: reply in %u us\n", i, (uint32_t)(vd_now_us() - t0));
-+				printf("VINCE WLAN: kernel ping %u: reply in %u us\n", i, (uint32_t)(vd_now_us() - t0));
+-				printf("TULIP WLAN: kernel ping %d: reply in %u us\n", i, (uint32_t)(vd_now_us() - t0));
++				printf("TULIP WLAN: kernel ping %u: reply in %u us\n", i, (uint32_t)(vd_now_us() - t0));
  			} else {
  				fail++;
--				printf("VINCE WLAN: kernel ping %d: no reply (%d)\n", i, err);
-+				printf("VINCE WLAN: kernel ping %u: no reply (%d)\n", i, err);
+-				printf("TULIP WLAN: kernel ping %d: no reply (%d)\n", i, err);
++				printf("TULIP WLAN: kernel ping %u: no reply (%d)\n", i, err);
  			}
  		}
 -		vince_smd_sleep(4000);
 +		vince_smd_sleep(vif_ping_period_ms);
  	}
--	printf("VINCE WLAN: kernel ping done, %d ok, %d failed\n", ok, fail);
-+	printf("VINCE WLAN: kernel ping done, %d ok, %d failed of %d\n", ok, fail, sent_n);
+-	printf("TULIP WLAN: kernel ping done, %d ok, %d failed\n", ok, fail);
++	printf("TULIP WLAN: kernel ping done, %d ok, %d failed of %d\n", ok, fail, sent_n);
  	sock_close(so);
  out:
  	(void)thread_terminate(current_thread());
@@ -599,7 +599,7 @@ index 8fe5c22..5b45916 100755
 +	vif_start_ping(12, 4000);
  	vif_run(75ULL * 1000000ULL);
  	if (ifnet_stat(vif_ifp, &st) == 0) {
- 		printf("VINCE WLAN: %s packets in %llu out %llu, errors in %llu out %llu\n", if_name(vif_ifp),
+ 		printf("TULIP WLAN: %s packets in %llu out %llu, errors in %llu out %llu\n", if_name(vif_ifp),
 diff --git a/bsd/dev/vince_wlan_net.c b/bsd/dev/vince_wlan_net.c
 index 9e5e58b..e5fca2f 100644
 --- a/bsd/dev/vince_wlan_net.c

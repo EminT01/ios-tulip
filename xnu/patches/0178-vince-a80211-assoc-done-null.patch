@@ -58,7 +58,7 @@ index a208f61..74616ca 100755
  	for (int pass = 0; pass < 2 && !hit; pass++) {
  		b = vd_bss_list(&n);
 @@ -1111,8 +1124,7 @@ vui_assoc(const struct vui_assoc *a, int stage)
- 		printf("VINCE UI: network not found\n");
+ 		printf("TULIP UI: network not found\n");
  		vui_set_state(VUI_S_INIT);
  		vui_set_result(9);
 -		res[0] = 9;                                     /* APPLE80211_RESULT_TIMEOUT */

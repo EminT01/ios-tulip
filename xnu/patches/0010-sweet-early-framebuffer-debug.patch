@@ -311,7 +311,7 @@ index 0000000..8f4c808
 +	}
 +#endif
 +	__asm__ volatile("dsb sy" ::: "memory");
-+	sweet_early_string("VINCE EARLY ");
++	sweet_early_string("TULIP EARLY ");
 +	if (stage >= 10) {
 +		sweet_early_putc((char)('0' + stage / 10));
 +	}

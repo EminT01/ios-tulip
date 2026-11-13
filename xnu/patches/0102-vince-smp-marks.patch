@@ -40,7 +40,7 @@ index 42506a1..b113ae6 100644
  	fGicMask = *(volatile uint32_t *)(vince_gicd_base + 0x800) & 0xff;
 +	vince_smp_mark(0x32);
  	if (fGicMask == 0) {
- 		panic("SWEET CPU: cpu %u has no GIC CPU interface bit", getCPUNumber());
+ 		panic("TULIP CPU: cpu %u has no GIC CPU interface bit", getCPUNumber());
  	}
 @@ -250,6 +262,9 @@ SweetCPU::initCPU(bool boot)
  		}

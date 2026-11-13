@@ -47,8 +47,8 @@
  	IOLockUnlock(fLock);
  
  	if (was != down) {
--		IOLog("SWEET HID: touch %d %s at %d,%d\n", finger, down ? "down" : "up", x, y);
-+		IOLog("SWEET HID: touch %d %s at %d,%d%s\n", finger, down ? "down" : "up", x, y,
+-		IOLog("TULIP HID: touch %d %s at %d,%d\n", finger, down ? "down" : "up", x, y);
++		IOLog("TULIP HID: touch %d %s at %d,%d%s\n", finger, down ? "down" : "up", x, y,
 +		    fEdge[finger] ? " edge" : "");
  	}
  	dispatchEvent(collection);

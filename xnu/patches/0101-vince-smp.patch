@@ -86,13 +86,13 @@ index 30d0eb0..42506a1 100644
  		return false;
  	}
  	if (topology->num_cpus != 1) {
- 		panic("SWEET CPU: only single-CPU bring-up is supported");
+ 		panic("TULIP CPU: only single-CPU bring-up is supported");
  	}
 +#else
 +	/* secondaries register after the boot CPU (its cpu_data and pset come first) */
 +	for (int i = 0; !boot && !os_atomic_load(&gVinceBootRegistered, acquire); i++) {
 +		if (i == 500) {
-+			IOLog("SWEET CPU: cpu %u gave up waiting for the boot CPU\n", cpu->cpu_id);
++			IOLog("TULIP CPU: cpu %u gave up waiting for the boot CPU\n", cpu->cpu_id);
 +			return false;
 +		}
 +		IOSleep(10);
@@ -107,11 +107,11 @@ index 30d0eb0..42506a1 100644
  	perfmon_interrupt_handler_func pmi_handler = NULL;
  	kern_return_t result = ml_processor_register(&info, &machProcessor, &ipi_handler, &pmi_handler);
  	if (result != KERN_SUCCESS) {
--		panic("SWEET CPU: ml_processor_register failed: %d", result);
-+		panic("SWEET CPU: ml_processor_register failed for cpu %u: %d", cpu->cpu_id, result);
+-		panic("TULIP CPU: ml_processor_register failed: %d", result);
++		panic("TULIP CPU: ml_processor_register failed for cpu %u: %d", cpu->cpu_id, result);
  	}
  	if (pmi_handler != NULL) {
- 		panic("SWEET CPU: PMI routing is not implemented");
+ 		panic("TULIP CPU: PMI routing is not implemented");
  	}
  
 -	/* Re-enter the boot CPU through cpu_machine_init -> PE_cpu_machine_init. */
@@ -132,7 +132,7 @@ index 30d0eb0..42506a1 100644
 +		while (result == KERN_SUCCESS && getCPUState() != kIOCPUStateRunning && mach_absolute_time() < deadline) {
 +			IOSleep(1);
 +		}
-+		IOLog("SWEET CPU: cpu %u (MPIDR %#x) %s\n", cpu->cpu_id, fPhysId,
++		IOLog("TULIP CPU: cpu %u (MPIDR %#x) %s\n", cpu->cpu_id, fPhysId,
 +		    result != KERN_SUCCESS ? "not started" :
 +		    getCPUState() == kIOCPUStateRunning ? "running" : "did not come up within 1 s");
 +		registerService();
@@ -141,11 +141,11 @@ index 30d0eb0..42506a1 100644
 +	}
 +#endif
  	if (result != KERN_SUCCESS || getCPUState() != kIOCPUStateRunning) {
- 		panic("SWEET CPU: processor_start failed: %d", result);
+ 		panic("TULIP CPU: processor_start failed: %d", result);
  	}
 +#if defined(VINCE)
 +	registerService();
-+	IOLog("SWEET CPU: boot CPU %u (MPIDR %#x) registered, SGI1 verified\n", getCPUNumber(), fPhysId);
++	IOLog("TULIP CPU: boot CPU %u (MPIDR %#x) registered, SGI1 verified\n", getCPUNumber(), fPhysId);
 +	finishStart(topology);
 +#else
  	ml_cpu_init_completed();
@@ -153,7 +153,7 @@ index 30d0eb0..42506a1 100644
  	registerService();
 @@ -93,9 +183,26 @@ SweetCPU::start(IOService *provider)
  	ml_set_max_cpus(topology->max_cpu_id + 1);
- 	IOLog("SWEET CPU: boot CPU %u registered, SGI1 verified, initialization complete\n",
+ 	IOLog("TULIP CPU: boot CPU %u registered, SGI1 verified, initialization complete\n",
  	    getCPUNumber());
 +#endif
  	return true;
@@ -171,7 +171,7 @@ index 30d0eb0..42506a1 100644
 +	cpusRunning();
 +	IOService::publishResource(gIOAllCPUInitializedKey, kOSBooleanTrue);
 +	ml_set_max_cpus(topology->max_cpu_id + 1);
-+	IOLog("SWEET CPU: %u CPUs, initialization complete\n", topology->num_cpus);
++	IOLog("TULIP CPU: %u CPUs, initialization complete\n", topology->num_cpus);
 +}
 +#endif
 +
@@ -179,7 +179,7 @@ index 30d0eb0..42506a1 100644
  SweetCPU::free(void)
  {
 @@ -110,6 +217,26 @@ SweetCPU::initCPU(bool boot)
- 		panic("SWEET CPU: resume is not implemented");
+ 		panic("TULIP CPU: resume is not implemented");
  	}
  	assert(cpu_number() == (int)getCPUNumber());
 +#if defined(VINCE)
@@ -198,7 +198,7 @@ index 30d0eb0..42506a1 100644
 +	/* GICD_ITARGETSR0 reads back this CPU's own interface bit (banked) */
 +	fGicMask = *(volatile uint32_t *)(vince_gicd_base + 0x800) & 0xff;
 +	if (fGicMask == 0) {
-+		panic("SWEET CPU: cpu %u has no GIC CPU interface bit", getCPUNumber());
++		panic("TULIP CPU: cpu %u has no GIC CPU interface bit", getCPUNumber());
 +	}
 +	__builtin_arm_dmb(DMB_ISH);
 +#endif
@@ -209,8 +209,8 @@ index 30d0eb0..42506a1 100644
  	signalCPU(this);
  	while (!ml_cpu_signal_is_enabled()) {
  		if (mach_absolute_time() > deadline) {
--			panic("SWEET CPU: SGI1 self-test timed out");
-+			panic("SWEET CPU: SGI1 self-test timed out on cpu %u", getCPUNumber());
+-			panic("TULIP CPU: SGI1 self-test timed out");
++			panic("TULIP CPU: SGI1 self-test timed out on cpu %u", getCPUNumber());
  		}
  		__asm__ volatile("yield");
  	}
@@ -220,7 +220,7 @@ index 30d0eb0..42506a1 100644
  {
 -	/* Only the boot CPU is registered by this driver. */
 -	if (target != this || cpu_number() != (int)getCPUNumber()) {
--		panic("SWEET CPU: secondary CPU signalling is not implemented");
+-		panic("TULIP CPU: secondary CPU signalling is not implemented");
 -	}
  #if defined(VINCE)
 -	extern vm_offset_t vince_gicd_base;
@@ -239,7 +239,7 @@ index 30d0eb0..42506a1 100644
  #else
 +	/* Only the boot CPU is registered by this driver. */
 +	if (target != this || cpu_number() != (int)getCPUNumber()) {
-+		panic("SWEET CPU: secondary CPU signalling is not implemented");
++		panic("TULIP CPU: secondary CPU signalling is not implemented");
 +	}
  	uint64_t mpidr = __builtin_arm_rsr64("MPIDR_EL1");
  	unsigned int aff0 = mpidr & 0xff;
@@ -253,7 +253,7 @@ index 30d0eb0..42506a1 100644
 +	uint64_t entry = ml_static_vtop((vm_offset_t)&LowResetVectorBase);
 +	int64_t r = vince_psci(PSCI_CPU_ON_64, fPhysId, entry, 0);
 +	if (r != 0) {
-+		IOLog("SWEET CPU: PSCI CPU_ON(%#x, %#llx) = %lld\n", fPhysId, entry, r);
++		IOLog("TULIP CPU: PSCI CPU_ON(%#x, %#llx) = %lld\n", fPhysId, entry, r);
 +		return KERN_FAILURE;
 +	}
 +	return KERN_SUCCESS;
@@ -280,7 +280,7 @@ index 1e3dc6e..e9a8b87 100644
 +	if (pmap != kernel_pmap && end > pmap->max) {
 +		static int vince_logged;
 +		if (vince_logged++ < 8) {
-+			printf("VINCE PMAP: remove [%#llx, %#llx) above max %#llx, callers %p %p\n", (uint64_t)start,
++			printf("TULIP PMAP: remove [%#llx, %#llx) above max %#llx, callers %p %p\n", (uint64_t)start,
 +			    (uint64_t)end, (uint64_t)pmap->max, __builtin_return_address(0), __builtin_return_address(1));
 +		}
 +		if (start >= pmap->max) {

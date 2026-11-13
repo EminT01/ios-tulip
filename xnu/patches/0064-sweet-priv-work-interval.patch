@@ -44,7 +44,7 @@
 +		sweet_priv_logged[sweet_priv_logged_count].priv = priv;
 +		strlcpy(sweet_priv_logged[sweet_priv_logged_count].name, name, sizeof(name));
 +		sweet_priv_logged_count++;
-+		printf("SWEET Sandbox: %s privilege %d denied\n", name, priv);
++		printf("TULIP Sandbox: %s privilege %d denied\n", name, priv);
 +	}
 +	return EPERM;
 +}

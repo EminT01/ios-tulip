@@ -12,7 +12,7 @@ index e5fca2f..35f6f46 100644
 +				int ours = eq(fr.data + 4, vw_mac, 6) || eq(fr.data + 4, bcast, 6);
 +
 +				/* a deauth / disassoc the AP sends to another station of the same BSS is not ours */
-+				printf("VINCE WLAN: %s from the AP to %02x:%02x:%02x:%02x:%02x:%02x reason %u%s\n",
++				printf("TULIP WLAN: %s from the AP to %02x:%02x:%02x:%02x:%02x:%02x reason %u%s\n",
 +				    fr.data[0] == 0xc0 ? "deauth" : "disassoc", fr.data[4], fr.data[5], fr.data[6], fr.data[7],
 +				    fr.data[8], fr.data[9], fr.data[24] | fr.data[25] << 8, ours ? "" : " (another station: ignored)");
 +				if (ours) {
