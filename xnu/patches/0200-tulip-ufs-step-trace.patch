@@ -1,0 +1,18 @@
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -362,2 +362,3 @@
+ {
++	printf("TULIP SDHCI: step 4: reading host registers\n");
+ 	uint32_t hc = ufs_rd(SD_HC), clk = ufs_rd(SD_CLK), cap = ufs_rd(SD_CAP0);
+@@ -594,2 +595,3 @@
+ 	PE_parse_boot_argn("ufsroot", want, sizeof(want));
++	printf("TULIP UFS: step 1: node ok, reg %llx %llx\n", (unsigned long long)reg[0], (unsigned long long)reg[1]);
+ 	uint32_t rw = 0;
+@@ -603,2 +605,3 @@
+ 	su.regs = ml_io_map(reg[0], reg[1]);
++	printf("TULIP UFS: step 2: regs mapped at %p\n", (void *)su.regs);
+ 	if (kmem_alloc_contig(kernel_map, &su.dma, DMA_SIZE, PAGE_MASK, 0, 0,
+@@ -613,2 +616,3 @@
+ 	su.dma_pa = ptoa_64(pn);
++	printf("TULIP UFS: step 3: DMA buffer at 0x%llx\n", (unsigned long long)su.dma_pa);
+ 	su.lun = 0;
