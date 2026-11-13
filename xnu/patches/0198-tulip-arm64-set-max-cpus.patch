@@ -1,0 +1,19 @@
+--- a/osfmk/arm64/machine_routines.c
++++ b/osfmk/arm64/machine_routines.c
+@@ -548,6 +548,16 @@
+ 	if (NULL != invalidate_hmac_function) {
+ 		invalidate_hmac_function();
+ 	}
+ 
+ 	lockdown_done = 1;
++
++	/*
++	 *	TULIP: ml_wait_max_cpus() blocks until max_cpus_initialized is
++	 *	MAX_CPUS_SET, but the only setter (ml_set_max_cpus) has no calle
++	 *	anywhere in the arm/arm64 tree - only i386 uses it.  kperf_init_early()
++	 *	calls ml_wait_max_cpus(), so the kernel bootstrap thread sleeps there
++	 *	forever and bsd_init() is never reached.  All CPUs are accounted fo
++	 *	by the time lockdown completes.
++	 */
++	ml_set_max_cpus(machine_info.max_cpus);
+ }
