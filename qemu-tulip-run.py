@@ -62,7 +62,7 @@ while time.time()-t0<SECS:
     t+=SAMPLE
 call('stop')
 call('pmemsave',val=FB,size=W*H*BPP,filename=os.path.abspath(f'{OUT}/fb.raw'))
-call('pmemsave',val=pb,size=0x18000000,filename=os.path.abspath(f'{OUT}/ramdump.bin'))
+call('pmemsave',val=pb,size=0x5c000000,filename=os.path.abspath(f'{OUT}/ramdump.bin'))
 pr.kill()
 json.dump(samples,open(f'{OUT}/samples.json','w'),indent=1)
 raw=open(f'{OUT}/fb.raw','rb').read()

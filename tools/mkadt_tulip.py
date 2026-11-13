@@ -134,7 +134,8 @@ def build_tulip_adt(seed=None):
         ('canvas-height', u32(2436)),
     ])
 
-    # SDHCI eMMC Storage Node
+    # SDHCI eMMC Storage Node. Lives at the ROOT of the tree: bsd/dev/sweet_ufs.c looks it up as "/sweet-ufs"
+    # (SecureDTLookupEntry from the root), so it must not be under /arm-io.
     sdhci_node = node('sweet-ufs', [
         ph(),
         ('compatible', cstr('generic-sdhci') + cstr('qcom,sdhci-msm-v5') + b'\0'),
@@ -176,7 +177,7 @@ def build_tulip_adt(seed=None):
         ('#address-cells', u32(2)),
         ('#size-cells', u32(2)),
         ('ranges', u64(0, SOC_BASE, 0x100000000 - SOC_BASE)),
-    ], [gic, wdt, disp0, sdhci_node, touch_node, wlan, bluetooth])
+    ], [gic, wdt, disp0, touch_node, wlan, bluetooth])
 
     # Vince Framebuffer console node for early kprintf
     fbcon = node('vince-fbcon', [
@@ -256,7 +257,7 @@ def build_tulip_adt(seed=None):
         ('timebase-frequency', u32(TIMEBASE)),
         ('#address-cells', u32(2)),
         ('#size-cells', u32(2)),
-    ], [chosen, defaults, cpus, arm_io, fbcon, buttons, pram] + product)
+    ], [chosen, defaults, cpus, arm_io, sdhci_node, fbcon, buttons, pram] + product)
 
     return root
 
