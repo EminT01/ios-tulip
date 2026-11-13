@@ -1,0 +1,25 @@
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -579,2 +579,9 @@
+ 
++#if defined(VINCE_TULIP)
++/* tulip: kmem_alloc_contig() of the DMA area never returns this early in
++ * bsd_init, so use a page-aligned buffer in the kernel image, which is
++ * physically contiguous by construction. */
++static char sweet_ufs_dma_static[DMA_SIZE] __attribute__((aligned(4096)));
++#endif
++
+ static int
+@@ -606,2 +613,5 @@
+ 	printf("TULIP UFS: step 2: regs mapped at %p\n", (void *)su.regs);
++#if defined(VINCE_TULIP)
++	su.dma = (typeof(su.dma))(uintptr_t)sweet_ufs_dma_static;
++#else
+ 	if (kmem_alloc_contig(kernel_map, &su.dma, DMA_SIZE, PAGE_MASK, 0, 0,
+@@ -611,4 +621,6 @@
+ 	}
++#endif
+ 	ppnum_t pn = pmap_find_phys(kernel_pmap, (addr64_t)su.dma);
+ 	if (!pn) {
++		printf("TULIP UFS: no physical page for the DMA area\n");
+ 		return ENOMEM;
