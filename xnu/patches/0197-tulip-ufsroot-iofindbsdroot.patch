@@ -1,0 +1,52 @@
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -780,13 +780,49 @@
+ 		strlcpy(rootName, rdBootVar, rootNameSize);
+ 		IOLog("BSD root: %s, major %d, minor %d\n", rootName, major(*root), minor(*root));
+ 		*oflags = 0;
+ 		goto iofrootx;
+ 	}
+ #endif
+ 
++#if defined(VINCE_TULIP)
++//
++//	TULIP: root on a GPT partition of the internal eMMC, through
++//	bsd/dev/sweet_ufs.c (Qualcomm SDHCI v5 host, ADT node /sweet-ufs).
++//	The SWEET block above is compiled out on this board config, so without this
++//	the driver is linked in but never asked for the root device, rd=ufsroot0
++//	falls through, and setconf falls back to 'sd0a'.
++//
++	{
++		extern int sweet_ufs_rootdev(dev_t *dev);
++		int ufs_probe = 0;
++
++		if (strcmp(rdBootVar, "ufsroot0") == 0) {
++			OSSafeReleaseNULL(matching);
++			int ufs_error = sweet_ufs_rootdev(root);
++			if (ufs_error) {
++				panic("IOFindBSDRoot: TULIP UFS root %s unavailable: %d", rdBootVar, ufs_error);
++			}
++			strlcpy(rootName, rdBootVar, rootNameSize);
++			IOLog("BSD root: %s, major %d, minor %d\n", rootName, major(*root), minor(*root));
++			*oflags = 0;
++			goto iofrootx;
++		}
++//
++//	ufsprobe=1 brings the host up and logs it while another root is used, so a
++//	dead eMMC path is visible on the console instead of silently ignored.
++//
++		if (PE_parse_boot_argn("ufsprobe", &ufs_probe, sizeof(ufs_probe)) && ufs_probe) {
++			dev_t ufs_dev = 0;
++			int ufs_error = sweet_ufs_rootdev(&ufs_dev);
++			printf("TULIP UFS: probe returned %d, device major %d minor %d\n",
++			    ufs_error, ufs_error ? -1 : major(ufs_dev), ufs_error ? -1 : minor(ufs_dev));
++		}
++	}
++#endif
++
+ #if defined(ARM64_BOARD_CONFIG_VINCE)
+ //
+ //	VINCE: root on a GPT partition of the internal eMMC (bsd/dev/vince_mmc.c).
+ //	mmcprobe=1 with another root only brings the eMMC up and logs what the partition holds.
+ //
+ 	{
