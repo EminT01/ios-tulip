@@ -1,0 +1,17 @@
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -643,10 +643,14 @@
+ 	    su.writable ? "read-write" : "read-only", su.dma_pa);
+ 	sweet_log_start();
+ 	sweet_sample_start();
++#if defined(ARM64_BOARD_CONFIG_SWEET)
+ 	/* Input drivers (HID services in iokit/Kernel/arm/hid/SweetHID.cpp). */
+ 	sweet_keys_init();
+ 	sweet_touch_init();
+ 	sweet_usb_probe();
++#else
++	/* tulip/vince: those drivers are not built; FTS touch and USB come later. */
++#endif
+ 	return 0;
+ }
+ 
