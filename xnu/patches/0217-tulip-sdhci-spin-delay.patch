@@ -1,0 +1,29 @@
+diff --git a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -73,6 +73,25 @@
+ #define ARM64_BOARD_CONFIG_LAVENDER 1
+ #endif
+ 
++/*
++ * delay() parks the CPU in WFE until a timer event arrives. This board never
++ * enables the event stream on the single running CPU, so the first delay()
++ * after a register poll sleeps forever (trace I in the 0216 boot: the log
++ * ends at "before 1 ms delay"). Spin on the counter instead.
++ */
++static void
++tulip_udelay(uint32_t us)
++{
++	uint64_t span, deadline;
++
++	nanoseconds_to_absolutetime((uint64_t)us * 1000ull, &span);
++	deadline = mach_absolute_time() + span;
++	while (mach_absolute_time() < deadline) {
++		__builtin_arm_isb(0xf);
++	}
++}
++#define delay(us) tulip_udelay(us)
++
+ static void tulip_log_start(void);
+ static void tulip_fb_test(void);
+ 
