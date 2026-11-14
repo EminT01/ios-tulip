@@ -11,10 +11,9 @@ diff --git a/bsd/conf/files b/bsd/conf/files
  bsd/dev/sweet_touch.c			standard
 diff --git a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
 new file mode 100644
-index 0000000000000000000000000000000000000000..8c4f2f4c9d1a0b7e5c3a2d1f0e9b8a7c6d5e4f3a
 --- /dev/null
 +++ b/bsd/dev/tulip_sdhci.c
-@@ -0,0 +1,4657 @@
+@@ -0,0 +1,4666 @@
 +/*
 + * TULIP (Redmi Note 6 Pro) internal eMMC 5.1 root device (polled SDHCI
 + * MSM v4, SDCC1).
@@ -2042,8 +2041,17 @@ index 0000000000000000000000000000000000000000..8c4f2f4c9d1a0b7e5c3a2d1f0e9b8a7c
 +	uint32_t cmd, cfg, cbcr;
 +	uint64_t deadline;
 +
++	/*
++	 * TULIP: without a mapped GCC window the bootloader's sdcc1_apps_clk_src
++	 * rate is what the card sees. LK leaves SDCC1 at 400 kHz-50 MHz, which is
++	 * a legal identification clock, so the RCG is left alone and only the
++	 * host divider/gate is rebuilt.
++	 */
 +	if (se.gcc == 0) {
-+		return ENXIO;
++		hc_wr16(SDHCI_CLOCK_CONTROL, 0);
++		printf("TULIP SDHCI: GCC not mapped, keeping the bootloader "
++		    "sdcc1_apps rate for %s\n", r->name);
++		return sdhci_enable_card_clock();
 +	}
 +
 +	hc_wr16(SDHCI_CLOCK_CONTROL, 0);
