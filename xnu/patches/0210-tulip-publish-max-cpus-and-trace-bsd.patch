@@ -9,13 +9,13 @@ next stall shows up on the framebuffer console.
 
 --- a/osfmk/arm64/machine_routines.c
 +++ b/osfmk/arm64/machine_routines.c
-@@ -561,4 +561,9 @@
+@@ -562,4 +562,9 @@
  #if !defined(VINCE) || !defined(TULIP_SMP)
          ml_set_max_cpus(machine_info.max_cpus);
  #endif
 +#if defined(VINCE) && defined(TULIP_SMP)
-+        /* SweetCPU publishes max_cpus from an IOKit start() that runs after this point,
-+         * so nothing would ever wake ml_wait_max_cpus(). Publish it here instead. */
++        /* SweetCPU::finishStart() runs from an IOKit start() that has not happened yet,
++         * so nothing would ever wake ml_wait_max_cpus() here.  Publish it now. */
 +        ml_set_max_cpus(machine_info.max_cpus);
 +#endif
  }
