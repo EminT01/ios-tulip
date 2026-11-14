@@ -1,0 +1,34 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -4234,4 +4234,12 @@
+ static char tulip_fail_text[192];
+ 
++/*
++ * The 1 MiB bounce buffer lives in the kernel image. kmem_alloc_contig() of
++ * this size never returns at this point of bsd_init on the 4 KiB tulip
++ * kernel (the last console line is the "GCC sdcc1_apps not mapped" message),
++ * and the kernel's own data segments are physically contiguous anyway.
++ */
++static char tulip_sdhci_bounce[BOUNCE_SIZE] __attribute__((aligned(4096)));
++
+ static int
+ tulip_sdhci_init(void)
+@@ -4289,15 +4297,12 @@
+ 		    "bootloader clock (no rate change possible)\n");
+ 	}
+-	if (kmem_alloc_contig(kernel_map, &se.dma, BOUNCE_SIZE, PAGE_MASK, 0, 0,
+-	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) !=
+-	    KERN_SUCCESS) {
+-		printf("TULIP SDHCI: no contiguous bounce buffer\n");
+-		return ENOMEM;
+-	}
++	se.dma = (vm_offset_t)tulip_sdhci_bounce;
+ 	ppnum_t pn = pmap_find_phys(kernel_pmap, (addr64_t)se.dma);
+ 	if (!pn) {
++		printf("TULIP SDHCI: no physical page for the bounce buffer\n");
+ 		return ENOMEM;
+ 	}
+ 	se.dma_pa = ptoa_64(pn);
++	printf("TULIP SDHCI: bounce buffer at pa 0x%llx\n", (unsigned long long)se.dma_pa);
+ 
+ 	lck_mtx_lock(&tulip_sdhci_lock);
