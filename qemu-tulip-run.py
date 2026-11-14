@@ -28,7 +28,7 @@ open(f'{OUT}/ram.bin','wb').write(img)
 open(f'{OUT}/stub.bin','wb').write(struct.pack('<4I2Q',0x58000080,0x580000a1,0xd61f0020,0xd503201f,ba_pa,ent+delta))
 mon=f'{OUT}/m.sock'
 if os.path.exists(mon): os.unlink(mon)
-pr=subprocess.Popen(['qemu-system-aarch64','-M','virt,gic-version=3','-cpu','cortex-a53','-smp','1',
+pr=subprocess.Popen(['qemu-system-aarch64','-M','virt,gic-version=3','-cpu','cortex-a53','-smp','8',
  '-m','4G','-nographic','-qmp',f'unix:{mon},server,nowait','-no-reboot',
  '-d','int,guest_errors','-D',f'{OUT}/qemu.log',
  '-device',f'loader,file={OUT}/ram.bin,addr={start:#x},force-raw=on',
