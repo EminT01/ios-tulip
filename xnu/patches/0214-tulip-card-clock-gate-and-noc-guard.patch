@@ -1,0 +1,81 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -302,7 +302,8 @@
+ #define CORE_DLL_CONFIG         0x100
+ #define CORE_DLL_STATUS         0x108
+ #endif
+-#define CORE_DLL_LOCK           0x00000080u     /* BIT(7) */
++#define CORE_DLL_LOCK           0x00000001u     /* BIT(0) DLL_LOCK */
++#define CORE_DLL_READY          0x00000004u     /* BIT(2) DLL_READY */
+ #define CORE_DLL_EN             0x00010000u     /* BIT(16) */
+ #define CORE_CK_OUT_EN          0x00040000u     /* BIT(18) */
+ #define CORE_DLL_PDN            0x20000000u     /* BIT(29) */
+@@ -1966,6 +1967,20 @@
+ {
+ 	uint16_t clk;
+ 	uint64_t deadline;
++        /* TULIP 0214: never blind-write CLOCK_CONTROL. When the gate is
++         * cleared the core loses MCLK and the next hc_rd16 never returns
++         * (AXI slave stops answering, delay() never runs): that is the
++         * frozen display after "DLL_CONFIG 0x0705604c". Read first and
++         * leave a running, stable card clock alone.
++         */
++        clk = hc_rd16(SDHCI_CLOCK_CONTROL);
++        if ((clk & SDHCI_CLOCK_CARD_EN) && (clk & SDHCI_CLOCK_INT_STABLE)) {
++                printf("TULIP SDHCI: card clock already running and stable "
++                    "(CLOCK_CONTROL 0x%04x), leaving it alone\n", clk);
++                return 0;
++        }
++        printf("TULIP SDHCI: card clock 0x%04x needs rebuild; "
++            "CORE_VENDOR_SPEC 0x%08x\n", clk, hc_rd(CORE_VENDOR_SPEC));
+ 
+ 	hc_wr16(SDHCI_CLOCK_CONTROL, 0);
+ 	hc_wr16(SDHCI_CLOCK_CONTROL, SDHCI_CLOCK_INT_EN);
+@@ -2051,6 +2066,19 @@
+ 		return ENXIO;
+ 	}
+ 
++	/*
++	 * TULIP 0214: the branch must be on the NOC before any RCGR write.
++	 * A register access while the NOC FSM is halted locks the AXI bus and
++	 * the boot dies with no output at all - the same signature as the
++	 * card-clock gate hang. Bail out instead of writing.
++	 */
++	if ((cbcr & GCC_BRANCH_NOC_MASK) != GCC_BRANCH_NOC_ON) {
++		printf("TULIP SDHCI: GCC sdcc1_apps NOC not on "
++		    "(CBCR 0x%08x, halt 0x%x != 0x%x), refusing RCGR write\n",
++		    cbcr, cbcr & GCC_BRANCH_NOC_MASK, GCC_BRANCH_NOC_ON);
++		return EIO;
++	}
++
+ 	gcc_wr(GCC_SDCC1_APPS_M, r->m);
+ 	gcc_wr(GCC_SDCC1_APPS_N, r->n);
+ 	gcc_wr(GCC_SDCC1_APPS_D, r->d);
+@@ -2142,6 +2170,7 @@
+ 	uint16_t handoff_hc2;
+ 	uint8_t handoff_ctrl, handoff_timeout;
+ 	uint32_t mci_clk = 0, mci_power = 0, vendor, probe_r1 = 0, probe_ocr = 0;
++	uint32_t noclkgate = 0;
+ 	uint64_t deadline;
+ 	int error, err0, err_cmd1;
+ 	bool reset_done, card_in_transfer = false;
+@@ -2268,9 +2297,16 @@
+ 	}
+ 
+ 	/* Step 5: card clock, proved live */
+-	error = sdhci_enable_card_clock();
+-	if (error) {
+-		return error;
++	if (PE_parse_boot_argn("noclkgate", &noclkgate, sizeof(noclkgate)) &&
++	    noclkgate != 0) {
++		printf("TULIP SDHCI: step 5 skipped by noclkgate=%u, trusting "
++		    "LK's card clock (CLOCK_CONTROL 0x%04x)\n",
++		    noclkgate, hc_rd16(SDHCI_CLOCK_CONTROL));
++	} else {
++		error = sdhci_enable_card_clock();
++		if (error) {
++			return error;
++		}
+ 	}
+ 
+ 	se.saved_ctrl = handoff_ctrl;
