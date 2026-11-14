@@ -1,0 +1,83 @@
+diff --git a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+index 60e96f1..a898336 100644
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -575,6 +575,70 @@ tulip_gcc_map(void)
+ 	return ml_io_map(GCC_BASE_PHYS, 0x1000);
+ }
+ 
++/*
++ * SDM636 GCC (gcc-sdm660.c): LK parks the SDCC1 branches before it jumps, and
++ * the vendor core then reads all zeros (MCI_VERSION 0). Registers, relative
++ * to GCC_BASE_PHYS 0x00100000:
++ *   GCC_SDCC1_APPS_CBCR 0x16004, GCC_SDCC1_AHB_CBCR 0x16008 (bit0 enable,
++ *   bit31 CLK_OFF), sdcc1_apps_clk_src CMD_RCGR 0x1602c, CFG +4, M +8, N +c,
++ *   D +0x10. 400 kHz = XO, pre_div 23, m=1, n=4, dual edge. Boot-arg
++ *   sdcclk=0 skips this.
++ */
++#define TULIP_SDC1_PAGE_PHYS   0x00116000u
++#define TULIP_SDC1_APPS_CBCR   0x004u
++#define TULIP_SDC1_AHB_CBCR    0x008u
++#define TULIP_SDC1_RCG_CMD     0x02cu
++#define TULIP_SDC1_RCG_CFG     0x030u
++#define TULIP_SDC1_RCG_M       0x034u
++#define TULIP_SDC1_RCG_N       0x038u
++#define TULIP_SDC1_RCG_D       0x03cu
++
++static void
++tulip_sdc1_clock_on(void)
++{
++	uint32_t off = 1;
++	vm_offset_t g;
++	volatile uint32_t *r;
++	uint64_t deadline;
++
++	if (PE_parse_boot_argn("sdcclk", &off, sizeof(off)) && off == 0) {
++		return;
++	}
++	g = ml_io_map(TULIP_SDC1_PAGE_PHYS, 0x1000);
++	if (g == 0) {
++		printf("TULIP SDHCI: cannot map GCC SDC1 page\n");
++		return;
++	}
++	r = (volatile uint32_t *)g;
++	printf("TULIP SDHCI: GCC SDC1 before: APPS_CBCR 0x%08x AHB_CBCR 0x%08x "
++	    "RCG CMD 0x%08x CFG 0x%08x\n", r[TULIP_SDC1_APPS_CBCR / 4],
++	    r[TULIP_SDC1_AHB_CBCR / 4], r[TULIP_SDC1_RCG_CMD / 4],
++	    r[TULIP_SDC1_RCG_CFG / 4]);
++
++	r[TULIP_SDC1_RCG_M / 4] = 0x01u;
++	r[TULIP_SDC1_RCG_N / 4] = 0xfcu;
++	r[TULIP_SDC1_RCG_D / 4] = 0xfbu;
++	r[TULIP_SDC1_RCG_CFG / 4] = 0x2017u;
++	r[TULIP_SDC1_RCG_CMD / 4] = r[TULIP_SDC1_RCG_CMD / 4] | 0x3u;
++	nanoseconds_to_absolutetime(1000ull * NSEC_PER_USEC, &deadline);
++	deadline += mach_absolute_time();
++	while ((r[TULIP_SDC1_RCG_CMD / 4] & 1u) && mach_absolute_time() < deadline) {
++		delay(1);
++	}
++	r[TULIP_SDC1_AHB_CBCR / 4] = r[TULIP_SDC1_AHB_CBCR / 4] | 1u;
++	r[TULIP_SDC1_APPS_CBCR / 4] = r[TULIP_SDC1_APPS_CBCR / 4] | 1u;
++	nanoseconds_to_absolutetime(1000ull * NSEC_PER_USEC, &deadline);
++	deadline += mach_absolute_time();
++	while (((r[TULIP_SDC1_APPS_CBCR / 4] | r[TULIP_SDC1_AHB_CBCR / 4]) & 0x80000000u) &&
++	    mach_absolute_time() < deadline) {
++		delay(1);
++	}
++	printf("TULIP SDHCI: GCC SDC1 after: APPS_CBCR 0x%08x AHB_CBCR 0x%08x "
++	    "RCG CMD 0x%08x CFG 0x%08x\n", r[TULIP_SDC1_APPS_CBCR / 4],
++	    r[TULIP_SDC1_AHB_CBCR / 4], r[TULIP_SDC1_RCG_CMD / 4],
++	    r[TULIP_SDC1_RCG_CFG / 4]);
++}
++
+ static void
+ dma_sync(uint32_t len, bool is_read)
+ {
+@@ -4278,6 +4342,7 @@ tulip_sdhci_init(void)
+ 	 * LK's HC_MODE is still 0; sdhci_core_check() uses these two values to
+ 	 * tell a live, clocked block from one held in reset.
+ 	 */
++	tulip_sdc1_clock_on();
+ 	mci_version_read = hc_rd(CORE_MCI_VERSION);
+ 	generics_read = hc_rd(CORE_GENERICS);
+ 	/*
