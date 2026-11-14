@@ -1,0 +1,37 @@
+diff --git a/osfmk/arm64/machine_routines.c b/osfmk/arm64/machine_routines.c
+index c61a929..020c8ab 100644
+--- a/osfmk/arm64/machine_routines.c
++++ b/osfmk/arm64/machine_routines.c
+@@ -562,6 +562,12 @@ machine_lockdown(void)
+ #if !defined(VINCE) || !defined(TULIP_SMP)
+ 	ml_set_max_cpus(machine_info.max_cpus);
+ #endif
++#if defined(VINCE) && defined(TULIP_SMP)
++	/* single CPU: no secondary will ever publish this; ml_set_max_cpus() is idempotent. */
++	if (machine_info.max_cpus == 1) {
++		ml_set_max_cpus(machine_info.max_cpus);
++	}
++#endif
+ }
+ 
+ 
+diff --git a/osfmk/kern/startup.c b/osfmk/kern/startup.c
+index f89de7c..0ae609c 100644
+--- a/osfmk/kern/startup.c
++++ b/osfmk/kern/startup.c
+@@ -782,6 +782,7 @@ kernel_bootstrap_thread(void)
+ 
+ 
+ #if KPERF
++	printf("TULIP BOOT: before kperf_init_early\n");
+ 	kperf_init_early();
+ #endif
+ 
+@@ -789,6 +790,7 @@ kernel_bootstrap_thread(void)
+ 	 *	Start the user bootstrap.
+ 	 */
+ #ifdef  MACH_BSD
++	printf("TULIP BOOT: before bsd_init\n");
+ 	bsd_init();
+ #endif
+ 
