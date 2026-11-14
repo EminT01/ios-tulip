@@ -21,12 +21,7 @@ next stall shows up on the framebuffer console.
  }
 --- a/osfmk/kern/startup.c
 +++ b/osfmk/kern/startup.c
-@@ -782,3 +782,4 @@
- #if KPERF
-+	printf("TULIP BOOT: before kperf_init_early\n");
- 	kperf_init_early();
- #endif
-@@ -788,4 +789,5 @@
+@@ -788,3 +789,4 @@
  #ifdef  MACH_BSD
 +	printf("TULIP BOOT: before bsd_init\n");
  	bsd_init();
