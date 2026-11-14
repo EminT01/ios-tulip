@@ -1,12 +1,17 @@
+diff --git a/osfmk/kern/startup.c b/osfmk/kern/startup.c
+index bec97fb..f89de7c 100644
 --- a/osfmk/kern/startup.c
 +++ b/osfmk/kern/startup.c
-@@ -755,3 +755,4 @@
-     kernel_bootstrap_log("OSKextRemoveKextBootstrap");
-+    printf("TULIP BOOT: into OSKextRemoveKextBootstrap\n");
-     OSKextRemoveKextBootstrap();
+@@ -753,10 +753,12 @@ kernel_bootstrap_thread(void)
+ 	 * the static KVA mappings used for the jettisoned bootstrap segments.
+ 	 */
+ 	kernel_bootstrap_log("OSKextRemoveKextBootstrap");
++	printf("TULIP BOOT: into OSKextRemoveKextBootstrap\n");
+ 	OSKextRemoveKextBootstrap();
  
-@@ -759,3 +760,4 @@
-     kernel_bootstrap_log("machine_lockdown");
-+    printf("TULIP BOOT: into machine_lockdown\n");
-     machine_lockdown();
+ 	/* No changes to kernel text and rodata beyond this point. */
+ 	kernel_bootstrap_log("machine_lockdown");
++	printf("TULIP BOOT: into machine_lockdown\n");
+ 	machine_lockdown();
  
+ #ifdef CONFIG_XNUPOST
