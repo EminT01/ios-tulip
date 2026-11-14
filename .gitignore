@@ -39,3 +39,7 @@ fb-from-dump.png
 .fbpath
 __pycache__/
 upstream/
+q/
+cmake*
+tmp-*.patch
+qemu-*2/
