@@ -1,0 +1,34 @@
+Trace the kernel bootstrap milestones that follow the OSLog setup
+
+The boot stops after "OSLog stream configured" and no later bootstrap log
+line ever reaches the framebuffer console, so it is not known whether the
+kernel is stuck in OSKextRemoveKextBootstrap(), in machine_lockdown() or in
+PE_lockdown_iokit(). Print the entry of each one on the console itself
+instead of relying on the OSLog ring that is not visible during early boot.
+
+--- a/osfmk/kern/startup.c
++++ b/osfmk/kern/startup.c
+@@ -759,6 +759,7 @@
+          * the static KVA mappings used for the jettisoned bootstrap segments.
+          */
+         kernel_bootstrap_log("OSKextRemoveKextBootstrap");
++        printf("TULIP BOOT: into OSKextRemoveKextBootstrap\n");
+         OSKextRemoveKextBootstrap();
+ 
+         /* No changes to kernel text and rodata beyond this point. */
+@@ -766,7 +767,9 @@
+         /* No changes to kernel text and rodata beyond this point. */
+         kernel_bootstrap_log("machine_lockdown");
++        printf("TULIP BOOT: into machine_lockdown\n");
+         machine_lockdown();
++        printf("TULIP BOOT: machine_lockdown done\n");
+ 
+ #ifdef CONFIG_XNUPOST
+         kern_return_t result = kernel_list_tests();
+@@ -779,7 +782,9 @@
+ #ifdef  IOKIT
+         kernel_bootstrap_log("PE_lockdown_iokit");
++        printf("TULIP BOOT: into PE_lockdown_iokit\n");
+         PE_lockdown_iokit();
++        printf("TULIP BOOT: PE_lockdown_iokit done\n");
+ #endif
