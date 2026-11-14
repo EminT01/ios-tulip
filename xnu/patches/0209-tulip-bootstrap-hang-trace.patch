@@ -1,13 +1,12 @@
-Trace the bootstrap milestone right after the trust cache setup
-
-The boot stops after "OSLog stream configured" and no later bootstrap log
-line reaches the framebuffer console. Print the entry of
-OSKextRemoveKextBootstrap() and machine_lockdown() on the console itself so
-the stall can be located without the OSLog ring.
-
 --- a/osfmk/kern/startup.c
 +++ b/osfmk/kern/startup.c
-@@ -762,0 +763,1 @@
-+        printf("TULIP BOOT: into OSKextRemoveKextBootstrap\n");
-@@ -769,0 +771,1 @@
-+        printf("TULIP BOOT: into machine_lockdown\n");
+@@ -755,3 +755,4 @@
+     kernel_bootstrap_log("OSKextRemoveKextBootstrap");
++    printf("TULIP BOOT: into OSKextRemoveKextBootstrap\n");
+     OSKextRemoveKextBootstrap();
+ 
+@@ -759,3 +760,4 @@
+     kernel_bootstrap_log("machine_lockdown");
++    printf("TULIP BOOT: into machine_lockdown\n");
+     machine_lockdown();
+ 
