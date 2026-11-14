@@ -205,28 +205,34 @@ def build_tulip_adt(seed=None):
         ('opposed-power-vol-buttons', u32(1)),
     ])
 
-    # CPUs: first milestone is single-CPU. cpu0 = Kryo 260 Silver (A53 class, MPIDR 0). The other seven
-    # (Silver 1-3, Gold 4-7 at MPIDR 0x100..0x103) are added once PSCI/GICv3 SMP is brought up.
+    # CPUs: all eight Kryo 260 cores, one homogeneous SMP cluster at a 4 KiB granule.
+    #   logical 0-3  -> Silver, MPIDR 0x000-0x003 (Cortex-A53 class, TGran16 = 0)
+    #   logical 4-7  -> Gold,   MPIDR 0x100-0x103 (Cortex-A73 class)
+    # The kernel is built with __ARM_16K_PG__ undefined (VINCE.h), so every core runs 4 KiB
+    # pages; Gold supports 4 KiB as well, so nothing is parked.  The ADT 'reg' property holds
+    # the raw MPIDR Aff1:Aff0, which start.s matches against CPU_PHYS_ID (MPIDR & 0xFFFF).
     cpu_nodes = []
-    for core in (0,):
+    for core in range(8):
+        gold = core >= 4
+        phys = (0x100 | (core - 4)) if gold else core
         c = node(f'cpu{core}', [
             ph(),
             ('device_type', cstr('cpu')),
             ('compatible', cstr('qcom,kryo260') + cstr('ARM,v8') + b'\0'),
-            ('reg', u32(core)),
+            ('reg', u32(phys)),
             ('cpu-id', u32(core)),
-            ('cluster-id', u32(0)),
+            ('cluster-id', u32(1 if gold else 0)),
             ('cluster-type', u32(0)),
             ('die-cluster-id', u32(0)),
-            ('cluster-core-id', u32(core)),
-            ('state', cstr('running')),
+            ('cluster-core-id', u32(phys & 0xff)),
+            ('state', cstr('running' if core == 0 else 'stopped')),
             ('timebase-frequency', u32(TIMEBASE)),
-            ('clock-frequency', u32(1800000000)),
+            ('clock-frequency', u32(1804800000 if gold else 1800000000)),
             ('bus-frequency', u32(100000000)),
             ('memory-frequency', u32(1866000000)),
             ('peripheral-frequency', u32(TIMEBASE)),
             ('fixed-frequency', u32(TIMEBASE)),
-            ('cpu-model', cstr('kryo260-silver')),
+            ('cpu-model', cstr('kryo260-gold' if gold else 'kryo260-silver')),
         ])
         cpu_nodes.append(c)
 

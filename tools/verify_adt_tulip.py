@@ -37,7 +37,12 @@ def main(path):
     check(r[0] >= FB[0] and r[0] + r[1] - 1 <= FB[1] and struct.unpack('<I', fb['bpp'])[0] == 32, 'fbcon inside LK splash FB, 32 bpp')
     check(struct.unpack('<I', fb['stride'])[0] == 4320, 'fbcon stride 4320')
     cpus = kids['cpus']
-    check(len(cpus.children) == 1, 'single cpu node (milestone 1)')
+    check(len(cpus.children) == 8, f'8 cpu nodes ({len(cpus.children)})')
+    regs = sorted(struct.unpack('<I', P(c)['reg'])[0] for c in cpus.children)
+    want = [0, 1, 2, 3, 0x100, 0x101, 0x102, 0x103]
+    check(regs == want, 'cpu regs are MPIDR 0x000-0x003 and 0x100-0x103')
+    ids = sorted(struct.unpack('<I', P(c)['cpu-id'])[0] for c in cpus.children)
+    check(ids == list(range(8)), 'cpu-id 0..7 contiguous')
     print('[OK]' if ok else '[BAD]')
     return 0 if ok else 1
 
