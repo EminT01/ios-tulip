@@ -1,0 +1,39 @@
+diff --git a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+index a898336..9b2c13e 100644
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -61,6 +61,18 @@
+ #include <sys/kernel.h>
+ #include <os/atomic_private.h>
+ 
++/*
++ * SDM636 carries an SDCC v5 core: the native SDHCI window is at the start of
++ * the block and the vendor registers live at 0x2xx/0x3xx (MCI_VERSION 0x318).
++ * That is the layout selected below by ARM64_BOARD_CONFIG_LAVENDER (SDM660),
++ * not the msm8937 one with the HC window at +0x900. Reading 0x50 on v5 returns
++ * zero, which is what the first tulip boots saw.
++ */
++#if (defined(VINCE_TULIP) || defined(ARM64_BOARD_CONFIG_TULIP)) && \
++	!defined(ARM64_BOARD_CONFIG_LAVENDER)
++#define ARM64_BOARD_CONFIG_LAVENDER 1
++#endif
++
+ static void tulip_log_start(void);
+ static void tulip_fb_test(void);
+ 
+@@ -596,12 +608,13 @@ tulip_gcc_map(void)
+ static void
+ tulip_sdc1_clock_on(void)
+ {
+-	uint32_t off = 1;
++	uint32_t on = 0;
+ 	vm_offset_t g;
+ 	volatile uint32_t *r;
+ 	uint64_t deadline;
+ 
+-	if (PE_parse_boot_argn("sdcclk", &off, sizeof(off)) && off == 0) {
++	/* LK leaves the SDC1 branches running on this board: opt-in only. */
++	if (!PE_parse_boot_argn("sdcclk", &on, sizeof(on)) || on == 0) {
+ 		return;
+ 	}
+ 	g = ml_io_map(TULIP_SDC1_PAGE_PHYS, 0x1000);
