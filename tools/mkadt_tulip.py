@@ -134,11 +134,13 @@ def build_tulip_adt(seed=None):
         ('canvas-height', u32(2436)),
     ])
 
-    # SDHCI eMMC Storage Node. Lives at the ROOT of the tree: bsd/dev/sweet_ufs.c looks it up as "/sweet-ufs"
-    # (SecureDTLookupEntry from the root), so it must not be under /arm-io.
-    sdhci_node = node('sweet-ufs', [
+    # SDHCI eMMC Storage Node. Lives at the ROOT of the tree: bsd/dev/tulip_sdhci.c looks it up as
+    # "/tulip-sdhci" (SecureDTLookupEntry from the root), so it must not be under /arm-io.
+    # reg[0] is the SDCC1 host window the driver maps (core at +0x000, standard SDHCI registers at
+    # +0x900: this SoC reports SDHCI 3.00, i.e. the legacy MCI layout, not the v5 one).
+    sdhci_node = node('tulip-sdhci', [
         ph(),
-        ('compatible', cstr('generic-sdhci') + cstr('qcom,sdhci-msm-v5') + b'\0'),
+        ('compatible', cstr('generic-sdhci') + cstr('qcom,sdhci-msm-v4') + b'\0'),
         ('reg', u64(SDHCI, SDHCI_SIZE, SDHCI_CORE, 0x1000)),
     ])
 

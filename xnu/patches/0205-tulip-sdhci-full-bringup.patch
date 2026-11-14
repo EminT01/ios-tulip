@@ -1,0 +1,156 @@
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -74,6 +74,105 @@
+ /* Standard SDHCI registers (Qualcomm SDCC; left in ADMA2/HS200 mode by the bootloader). */
+ #define SD_BLK          0x04
+ #define SD_ARG          0x08
++
++/*
++ * tulip: the SDCC core on this SoC (SDM636, sdhci-msm) is the legacy-MCI
++ * variant, not the native-HC v5 one. The standard SDHCI window lives at
++ * core + 0x900 and is NOT decoded until HC_MODE_EN is set; the legacy MCI
++ * registers that the bootloader actually drove sit at core + 0x000.
++ *
++ * Everything below is ported from ios-whyred2 (same SDM636 SoC, same
++ * controller, storage proven on hardware at 8-bit high speed). The probe
++ * order there was paid for in boot cycles; it is reproduced here verbatim:
++ *
++ *   VENDOR_SPEC(board) -> HC_MODE_EN -> FF_CLK_SW_RST_DIS -> RESET_ALL
++ *   -> select_hc_clock -> bus power -> GCC sdcc1_apps rate -> card clock
++ *   -> DLL bypass -> standard FIFO
++ *
++ * Skipping any of these leaves a controller that answers register reads but
++ * never puts a command on the bus: CLOCK_CONTROL reports INT_EN|INT_STABLE
++ * while CMD_INHIBIT stays set forever, including for CMD0.
++ */
++#define SD_HC_BASE      0x900u          /* standard SDHCI window offset */
++#define SD_SDMA         0x00            /* SDMA system address (32-bit) */
++#define SD_BLK_CNT      0x06
++#define SD_XFER_MODE    0x0c
++#define SD_CMD16        0x0e            /* [15:8] index, [7:0] flags; [15:0] TM in 0x0c */
++#define SD_RESP         0x10
++#define SD_BUF          0x20
++#define SD_PWR          0x29
++#define SD_RESET        0x2f
++#define SD_ISTS2        0x30
++#define SD_IEN          0x34
++#define SD_SIGEN        0x38
++#define SD_HC2          0x3e            /* HOST_CONTROL2 (16-bit) */
++#define SD_VERSION      0xfe
++
++#define SD_TM_DMA       0x0001
++#define SD_TM_BLKCNT    0x0002
++#define SD_TM_ACMD12    0x0004
++#define SD_TM_READ      0x0010
++#define SD_TM_MULTI     0x0020
++
++#define SD_C_RESP_LONG  0x01
++#define SD_C_RESP_SHORT 0x02
++#define SD_C_RESP_BUSY  0x03
++#define SD_C_CRC        0x08
++#define SD_C_IDX        0x10
++#define SD_C_DATA       0x20
++
++#define SD_INT_CC       0x00000001u
++#define SD_INT_TC       0x00000002u
++#define SD_INT_ERR      0x00008000u
++#define SD_INT_CMDTMO   0x00010000u
++#define SD_INT_CMDCRC   0x00020000u
++#define SD_INT_CMDEND   0x00040000u
++#define SD_INT_CMDIDX   0x00080000u
++#define SD_INT_DATTMO   0x00100000u
++#define SD_INT_DATCRC   0x00200000u
++#define SD_INT_ADMAERR  0x02000000u
++
++#define SD_CLK_INT_EN   0x0001
++#define SD_CLK_STABLE   0x0002
++#define SD_CLK_CARD_EN  0x0004
++
++#define SD_CTRL_DMA_MASK 0x18u
++#define SD_CTRL_8BIT     0x20u
++#define SD_CTRL_4BIT     0x02u
++#define SD_CTRL_HISPD    0x04u
++#define SD_CTRL_UHS_MASK 0x0007u
++
++#define SD_RESET_ALL    0x01
++#define SD_RESET_CMD    0x02
++#define SD_RESET_DATA   0x04
++
++#define SD_PRES_CMDINH  0x00000001u
++#define SD_PRES_DATINH  0x00000002u
++#define SD_PRES_DAT0    0x00100000u
++
++/* Qualcomm vendor core registers (sdhci-msm), legacy-MCI variant offsets. */
++#define CORE_MCI_VERSION        0x50
++#define CORE_GENERICS           0x70
++#define CORE_HC_MODE            0x78
++#define CORE_HC_MODE_EN         0x00000001u
++#define CORE_FF_CLK_SW_RST_DIS  0x00002000u
++#define CORE_PWRCTL_STATUS      0x0dc
++#define CORE_PWRCTL_MASK        0x0e0
++#define CORE_PWRCTL_CLEAR       0x0e4
++#define CORE_PWRCTL_CTL         0x0e8
++#define CORE_PWRCTL_BUS_OFF     0x00000001u
++#define CORE_PWRCTL_BUS_ON      0x00000002u
++#define CORE_PWRCTL_IO_LOW      0x00000004u
++#define CORE_PWRCTL_IO_HIGH     0x00000008u
++#define CORE_PWRCTL_INT_MASK    0x0000000fu
++#define CORE_PWRCTL_BUS_SUCCESS 0x00000001u
++#define CORE_PWRCTL_IO_SUCCESS  0x00000004u
++#define CORE_IO_PAD_SW_EN       0x00008000u
++#define CORE_IO_PAD_SW          0x00010000u
++#define CORE_VENDOR_SPEC        0x10c
++#define CORE_VENDOR_SPEC3       0x1b0
++#define CORE_FIFO_ALT_EN        0x00000400u     /* BIT(10): data -> CMDQ FIFO */
++#define CORE_VENDOR_SPEC_POR    0x00000a9cu
++#define CORE_VENDOR_SPEC_BOARD  (CORE_VENDOR_SPEC_POR | CORE_IO_PAD_SW_EN | CORE_IO_PAD_SW)
++#define CORE_HC_MCLK_SEL_MASK   (3u << 8)
++#define CORE_HC_MCLK_SEL_DFLT   (2u << 8)
++#define CORE_HC_SELECT_IN_EN    0x00040000u
++#define CORE_HC_SELECT_IN_MASK  (7u << 19)
++#define CORE_DLL_CONFIG         0x100
++#define CORE_DLL_STATUS         0x108
++#define CORE_DLL_LOCK           0x00000080u
++#define CORE_DLL_EN             0x00010000u
++#define CORE_CK_OUT_EN          0x00040000u
++#define CORE_DLL_PDN            0x20000000u
++#define CORE_DLL_RST            0x40000000u
++#define CORE_DLL_OFF            (CORE_DLL_RST | CORE_DLL_PDN)
++#define CORE_MCI_POWER          0x000
++#define CORE_MCI_CLK            0x004
++
++#define SD_PWR_ON_18            0x0bu           /* 1.8 V, BUS_POWER on */
++#define SD_PRESET_OFF           0
++
++/* GCC: sdcc1_apps_clk_src RCG. Block base 0x00100000 (vendor DTS
++ * clock-controller@100000, reg <0x100000 0x94000>); sdcc1_apps at +0x84000.
++ * 0x01842000 - the value this driver used before - is above the block, so
++ * every rate write went nowhere.
++ */
++#define GCC_BASE                0x00100000u
++#define GCC_SDCC1_APPS          0x00084000u
++#define GCC_APPS_CMD_RCGR       0x004u
++#define GCC_APPS_CFG_RCGR       0x008u
++#define GCC_APPS_M              0x00cu
++#define GCC_APPS_N              0x010u
++#define GCC_APPS_D              0x014u
++#define GCC_APPS_CBCR           0x018u
++#define GCC_CMD_UPDATE          0x00000001u
++#define GCC_CMD_ROOT_OFF        0x80000000u
++#define GCC_CFG_DIV_MASK        0x0000001fu
++#define GCC_CFG_SEL_MASK        0x00000700u
++#define GCC_CFG_MODE_MASK       0x00003000u
++#define GCC_CBCR_CLK_OFF        0x80000000u
++
++struct tulip_gcc_rate {
++	const char *name;
++	uint32_t m, n, d, cfg;
++};
++
++/* clk_rcg2_set_rate() encoding; M/N/D are inverted, SRC_DIV = 2*h - 1. */
++static const struct tulip_gcc_rate tulip_gcc_rates[] = {
++	{ "400 kHz", 0x01u, 0xfcu, 0xfbu, 0x2017u },
++	{ "25 MHz",  0x01u, 0xfeu, 0xfdu, 0x211fu },
++};
++
+ #define SD_CMD          0x0c                    /* [31:16] command, [15:0] transfer mode */
