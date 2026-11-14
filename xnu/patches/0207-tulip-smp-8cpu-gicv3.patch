@@ -1,59 +1,40 @@
 diff --git a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
-new file mode 100644
---- /dev/null
+index 3af73ce..162dc08 100644
+--- a/iokit/Kernel/arm/SweetCPU.cpp
 +++ b/iokit/Kernel/arm/SweetCPU.cpp
-@@ -0,0 +1,659 @@
-+/*
-+ * CPU bring-up for sweet / vince using XNU's legacy IOCPU interface.
-+ *
-+ * sweet: the boot CPU only.
-+ * vince: the boot CPU plus every other /cpus node in the ADT (CPU1 is not there: the shim's USB monitor owns it).
-+ * Secondaries are started with PSCI CPU_ON at LowResetVectorBase (reset_vector matches MPIDR Aff1:Aff0 against
-+ * the per-CPU data on VINCE), signalled with GICv2 SGIs through GICD_SGIR, and set up their banked GIC state
-+ * (SGI/PPI group, priority, enables, CPU interface) themselves in initCPU().
-+ */
-+#include <pexpert/arm64/board_config.h>
-+
-+#if defined(SWEET) || defined(VINCE)
-+#include <IOKit/IOCPU.h>
-+#include <IOKit/IOLib.h>
-+#include <libkern/c++/OSData.h>
-+#include <libkern/c++/OSNumber.h>
-+#include <arm64/proc_reg.h>
-+#include <machine/atomic.h>
-+#include <kern/clock.h>
-+#include <kern/processor.h>
-+#include <mach/mach_time.h>
-+
-+#if defined(VINCE_TULIP)
-+/*
+@@ -22,11 +22,14 @@
+ 
+ #if defined(VINCE_TULIP)
+ /*
+- * tulip (Redmi Note 6 Pro, SDM636): GICv3 with two security states, like sweet. Bring-up is the SWEET boot-CPU
+- * path (ICC_SGI1R_EL1 IPIs, no PSCI, no MSM8953 clock/mark-page access). Secondary cores are a later milestone.
 + * tulip (Redmi Note 6 Pro, SDM636) uses the VINCE SMP path with a GICv3 twist:
 + *  - the CPU interface is reached through system registers (ICC_SGI1R_EL1), not GICD_SGIR
 + *  - each core's private state lives in its own redistributor frame (GICR, 0x17b00000 + 0x20000*idx)
 + *  - the distributor is already up (pe_init_fiq did it), so no GICD_CTLR work here
 + * The MSM8953-specific parts (A53 PLL overclock, 0x913F0000 mark page) are skipped below.
 + * VINCE stays defined so the PSCI CPU_ON / processor_start / finishStart plumbing is compiled in.
-+ */
+  */
+-#undef VINCE
+-#define SWEET 1
 +#define VINCE_GIC_V3 1
-+#endif
-+
-+#if defined(VINCE)
-+extern "C" {
-+extern vm_offset_t vince_gicd_base;
-+extern vm_offset_t vince_gicc_base;
-+extern uint32_t vince_vtimer_intid;
+ #endif
+ 
+ #if defined(VINCE)
+@@ -34,6 +37,9 @@ extern "C" {
+ extern vm_offset_t vince_gicd_base;
+ extern vm_offset_t vince_gicc_base;
+ extern uint32_t vince_vtimer_intid;
 +#if defined(VINCE_GIC_V3)
 +extern vm_offset_t vince_gicr_base;
 +#endif
-+extern unsigned int LowResetVectorBase;
-+vm_offset_t ml_static_vtop(vm_offset_t);
-+vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
-+extern volatile uint64_t *vince_smp_mark_va;
-+void vince_smp_mark(uint64_t code);
-+}
-+
-+#define PSCI_CPU_ON_64  0xc4000003ULL
-+
+ extern unsigned int LowResetVectorBase;
+ vm_offset_t ml_static_vtop(vm_offset_t);
+ vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+@@ -43,6 +49,52 @@ void vince_smp_mark(uint64_t code);
+ 
+ #define PSCI_CPU_ON_64  0xc4000003ULL
+ 
 +#if defined(VINCE_GIC_V3)
 +/*
 + * GICv3 redistributor frames: one 0x20000-byte frame per PE, in MPIDR order (Aff1:Aff0 in
@@ -100,363 +81,42 @@ new file mode 100644
 +}
 +#endif /* VINCE_GIC_V3 */
 +
-+/* SMC64 PSCI call (x0 = function, x1..x3 = arguments); TZ returns the status in x0 */
-+static int64_t
-+vince_psci(uint64_t fn, uint64_t a1, uint64_t a2, uint64_t a3)
-+{
-+	register uint64_t x0 asm("x0") = fn;
-+	register uint64_t x1 asm("x1") = a1;
-+	register uint64_t x2 asm("x2") = a2;
-+	register uint64_t x3 asm("x3") = a3;
-+	__asm__ volatile ("smc #0"
-+            : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3)
-+            :
-+            : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17",
-+              "memory");
-+	return (int64_t)x0;
-+}
-+
-+/*
-+ * This CPU's clock in MHz: PMCCNTR_EL0 against CNTVCT over about 10 ms (busy, interrupts as they are). LK leaves
-+ * the A53 clusters at whatever it booted them with; there is no cpufreq here.
-+ */
-+static uint32_t
-+vince_cpu_mhz(void)
-+{
-+	uint64_t pmcr = __builtin_arm_rsr64("PMCR_EL0");
-+	__builtin_arm_wsr64("PMCR_EL0", (pmcr | 1) & ~(1ULL << 3));      /* enable, count every cycle (D = 0) */
-+	__builtin_arm_wsr64("PMCNTENSET_EL0", 1ULL << 31);
-+	__builtin_arm_isb(ISB_SY);
-+	uint64_t f = __builtin_arm_rsr64("CNTFRQ_EL0");
-+	uint64_t t0 = __builtin_arm_rsr64("CNTVCT_EL0"), c0 = __builtin_arm_rsr64("PMCCNTR_EL0");
-+	uint64_t t1, c1;
-+	do {
-+		__builtin_arm_isb(ISB_SY);
-+		t1 = __builtin_arm_rsr64("CNTVCT_EL0");
-+	} while (t1 - t0 < f / 100);
-+	c1 = __builtin_arm_rsr64("PMCCNTR_EL0");
-+	return f ? (uint32_t)((c1 - c0) * f / (t1 - t0) / 1000000) : 0;
-+}
-+
-+static uint32_t gVinceMHz[8];
-+
-+/*
-+ * Cluster clock muxes (Android DT qcom,cpu-clock-8953: c0-mux 0x0b111050, c1-mux 0x0b011050; CMD +0, CFG +4,
-+ * CFG src_sel bits 8-10: 0 XO, 4 GPLL0, 5 the A53 PLL; div bits 0-4). Measured: LK leaves cluster 0 (MPIDR 0x0xx)
-+ * on GPLL0/1 = 800 MHz (CFG 0x401) and cluster 1 (MPIDR 0x1xx) on XO = 19.2 MHz (CFG 0), so threads the scheduler
-+ * put on CPUs 4-7 ran 40 times slower. Both clusters share VDD_APC, which already carries cluster 0 at 800 MHz:
-+ * give cluster 1 the same source. The A53 PLL (for more than 800 MHz) stays off; that needs CPR voltage control.
-+ */
-+extern "C" boolean_t PE_parse_boot_argn(const char *arg_string, void *arg_ptr, int max_arg);
-+
-+/*
-+ * Vince CPU Clock Configuration:
-+ * LK leaves cluster 0 on GPLL0 (800 MHz) and cluster 1 on XO (19.2 MHz).
-+ * Initialize APCS A53 PLL at 0x0b116000 to 1401.6 MHz (L = 73, ref 19.2 MHz XO).
-+ * At default VDD_APC voltage (870 mV), 1401.6 MHz is fully within Qualcomm specs
-+ * (Corner 2 ceiling is 860 mV).
-+ * Switch both Cluster 0 (0x0b111050) and Cluster 1 (0x0b011050) to APCS A53 PLL (0x501).
-+ */
-+static void
-+vince_cpu_clock_init(void)
-+{
-+	uint32_t target_mhz = 1401;
-+	PE_parse_boot_argn("vincemhz", &target_mhz, sizeof(target_mhz));
-+
-+	vm_offset_t c0 = ml_io_map(0x0b111000, 0x1000), c1 = ml_io_map(0x0b011000, 0x1000);
-+	if (!c0 || !c1) {
-+		IOLog("VINCE CLK: mux mapping failed\n");
-+		return;
-+	}
-+
-+	volatile uint32_t *cmd0 = (volatile uint32_t *)(c0 + 0x50), *cfg0 = (volatile uint32_t *)(c0 + 0x54);
-+	volatile uint32_t *cmd1 = (volatile uint32_t *)(c1 + 0x50), *cfg1 = (volatile uint32_t *)(c1 + 0x54);
-+
-+	if (target_mhz == 800) {
-+		/* Fallback: keep GPLL0 800 MHz, align cluster 1 to cluster 0 */
-+		*cfg1 = *cfg0;
-+		__builtin_arm_dsb(DSB_SY);
-+		*cmd1 = *cmd1 | 1;
-+		__builtin_arm_dsb(DSB_SY);
-+		int i = 0;
-+		while ((*cmd1 & 1) && i++ < 1000) {
-+			IODelay(1);
-+		}
-+		IOLog("VINCE CLK: clusters kept at GPLL0 800 MHz\n");
-+		return;
-+	}
-+
-+	vm_offset_t pll = ml_io_map(0x0b116000, 0x1000);
-+	if (!pll) {
-+		IOLog("VINCE CLK: PLL mapping failed\n");
-+		return;
-+	}
-+
-+	uint32_t l_val = 73; /* default 1401.6 MHz */
-+	if (target_mhz == 1036) {
-+		l_val = 54; /* 1036.8 MHz */
-+	}
-+
-+	/* 1. Configure APCS A53 PLL */
-+	*(volatile uint32_t *)(pll + 0x20) = 0x200D4828; /* CONFIG_CTL_LO */
-+	*(volatile uint32_t *)(pll + 0x24) = 0x00000006; /* CONFIG_CTL_HI */
-+	*(volatile uint32_t *)(pll + 0x30) = 0x1C000000; /* TEST_CTL_LO */
-+	*(volatile uint32_t *)(pll + 0x34) = 0x00004000; /* TEST_CTL_HI */
-+	*(volatile uint32_t *)(pll + 0x18) = 0x00000109; /* USER_CTL: post_div 0x100 | early 0x8 | main 0x1 */
-+	*(volatile uint32_t *)(pll + 0x08) = l_val;      /* L_VAL */
-+
-+	/* 2. Enable PLL */
-+	*(volatile uint32_t *)(pll + 0x00) = 0x2;        /* PLL_BYPASSNL */
-+	__builtin_arm_dsb(DSB_SY);
-+	IODelay(10);
-+	*(volatile uint32_t *)(pll + 0x00) = 0x6;        /* PLL_BYPASSNL | PLL_RESET_N */
-+	__builtin_arm_dsb(DSB_SY);
-+
-+	/* 3. Wait for lock (bit 31) */
-+	int timeout = 10000;
-+	while ((*(volatile uint32_t *)(pll + 0x00) & (1U << 31)) == 0 && timeout--) {
-+		IODelay(1);
-+	}
-+	if (timeout <= 0) {
-+		IOLog("VINCE CLK: APCS PLL lock failed: %#x\n", *(volatile uint32_t *)(pll + 0x00));
-+		return;
-+	}
-+	*(volatile uint32_t *)(pll + 0x00) = 0x7;        /* PLL_OUTCTRL */
-+	__builtin_arm_dsb(DSB_SY);
-+
-+	/* 4. Switch Cluster 0 and Cluster 1 muxes to A53 PLL (src_sel = 5, div = 1 -> 0x501) */
-+	*cfg0 = 0x501;
-+	__builtin_arm_dsb(DSB_SY);
-+	*cmd0 = *cmd0 | 1;
-+	__builtin_arm_dsb(DSB_SY);
-+	timeout = 1000;
-+	while ((*cmd0 & 1) && timeout--) {
-+		IODelay(1);
-+	}
-+
-+	*cfg1 = 0x501;
-+	__builtin_arm_dsb(DSB_SY);
-+	*cmd1 = *cmd1 | 1;
-+	__builtin_arm_dsb(DSB_SY);
-+	timeout = 1000;
-+	while ((*cmd1 & 1) && timeout--) {
-+		IODelay(1);
-+	}
-+
-+	IOLog("VINCE CLK: APCS PLL locked (L=%u), both clusters set to A53 PLL (0x501)\n", l_val);
-+}
-+static uint32_t gVinceBootRegistered;   /* the boot CPU finished processor_start */
-+static uint32_t gVinceStarted;
-+static uint32_t gVinceStartBusy;        /* one secondary at a time through register + start + wait */
-+#endif
-+
-+class SweetCPU : public IOCPU {
-+	OSDeclareDefaultStructors(SweetCPU);
-+	const OSSymbol *cpuName = NULL;
-+#if defined(VINCE)
-+	uint32_t fPhysId = 0;
-+	bool fBoot = false;
-+	uint32_t fGicMask = 0;          /* this CPU's GICv2 CPU interface bit (GICD_ITARGETSR0, read on the CPU) */
+ /* SMC64 PSCI call (x0 = function, x1..x3 = arguments); TZ returns the status in x0 */
+ static int64_t
+ vince_psci(uint64_t fn, uint64_t a1, uint64_t a2, uint64_t a3)
+@@ -200,6 +252,7 @@ class SweetCPU : public IOCPU {
+ 	uint32_t fPhysId = 0;
+ 	bool fBoot = false;
+ 	uint32_t fGicMask = 0;          /* this CPU's GICv2 CPU interface bit (GICD_ITARGETSR0, read on the CPU) */
 +	uint32_t fGicr = 0;             /* GICv3: this CPU's redistributor resolved and configured */
-+	void finishStart(const ml_topology_info_t *topology);
-+#endif
-+
-+public:
-+	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
-+	void free(void) APPLE_KEXT_OVERRIDE;
-+	void initCPU(bool boot) APPLE_KEXT_OVERRIDE;
-+	void quiesceCPU(void) APPLE_KEXT_OVERRIDE;
-+	kern_return_t startCPU(vm_offset_t start_paddr, vm_offset_t arg_paddr) APPLE_KEXT_OVERRIDE;
-+	void haltCPU(void) APPLE_KEXT_OVERRIDE;
-+	void signalCPU(IOCPU *target) APPLE_KEXT_OVERRIDE;
-+	const OSSymbol *getCPUName(void) APPLE_KEXT_OVERRIDE;
-+};
-+
-+OSDefineMetaClassAndStructors(SweetCPU, IOCPU);
-+
-+bool
-+SweetCPU::start(IOService *provider)
-+{
-+	const ml_topology_info_t *topology = ml_get_topology_info();
-+	OSNumber *logical = OSDynamicCast(OSNumber, provider->getProperty("logical-cpu-id"));
-+	OSData *reg = OSDynamicCast(OSData, provider->getProperty("reg"));
-+
-+	if (logical == NULL || reg == NULL || reg->getLength() != sizeof(uint32_t) ||
-+	    logical->unsigned32BitValue() >= topology->num_cpus) {
-+		return false;
-+	}
-+	const ml_topology_cpu_t *cpu = &topology->cpus[logical->unsigned32BitValue()];
-+	if (*(const uint32_t *)reg->getBytesNoCopy() != cpu->phys_id) {
-+		return false;
-+	}
-+	bool boot = cpu == topology->boot_cpu;
-+#if !defined(VINCE)
-+	if (!boot) {
-+		return false;
-+	}
-+	if (topology->num_cpus != 1) {
-+		panic("SWEET CPU: only single-CPU bring-up is supported");
-+	}
-+#else
-+	/* secondaries register after the boot CPU (its cpu_data and pset come first) */
-+	for (int i = 0; !boot && !os_atomic_load(&gVinceBootRegistered, acquire); i++) {
-+		if (i == 500) {
-+			IOLog("SWEET CPU: cpu %u gave up waiting for the boot CPU\n", cpu->cpu_id);
-+			return false;
-+		}
-+		IOSleep(10);
-+	}
-+	fPhysId = cpu->phys_id;
-+	fBoot = boot;
-+	/*
-+	 * The CPU nubs match in parallel threads; measured with all six at once: two CPUs never got past the reset
-+	 * vector's marks and the system stopped early in boot. Serialize the secondaries.
-+	 */
-+	while (!boot && !os_atomic_cmpxchg(&gVinceStartBusy, 0, 1, acquire)) {
-+		IOSleep(5);
-+	}
-+#endif
-+	if (!IOCPU::start(provider)) {
-+#if defined(VINCE)
-+		if (!boot) {
-+			os_atomic_store(&gVinceStartBusy, 0, release);
-+		}
-+#endif
-+		return false;
-+	}
-+#if defined(VINCE)
-+	cpuName = OSSymbol::withCStringNoCopy("Cortex-A53");
-+#else
-+#if defined(VINCE_TULIP)
-+	cpuName = OSSymbol::withCStringNoCopy("Kryo 260");
-+#else
-+	cpuName = OSSymbol::withCStringNoCopy("Kryo 470");
-+#endif
-+#endif
-+	if (cpuName == NULL) {
-+		return false;
-+	}
-+	setCPUNumber(cpu->cpu_id);
-+
-+	ml_processor_info_t info = {};
-+	info.cpu_id = reinterpret_cast<cpu_id_t>(this);
-+	info.phys_id = cpu->phys_id;
-+	info.log_id = cpu->cpu_id;
-+	info.cluster_id = cpu->cluster_id;
-+	info.cluster_type = cpu->cluster_type;
-+	info.l2_cache_id = cpu->l2_cache_id;
-+	info.l2_cache_size = cpu->l2_cache_size;
-+	info.l3_cache_id = cpu->l3_cache_id;
-+	info.l3_cache_size = cpu->l3_cache_size;
-+	perfmon_interrupt_handler_func pmi_handler = NULL;
-+	kern_return_t result = ml_processor_register(&info, &machProcessor, &ipi_handler, &pmi_handler);
-+	if (result != KERN_SUCCESS) {
-+		panic("SWEET CPU: ml_processor_register failed for cpu %u: %d", cpu->cpu_id, result);
-+	}
-+	if (pmi_handler != NULL) {
-+		panic("SWEET CPU: PMI routing is not implemented");
-+	}
-+
+ 	void finishStart(const ml_topology_info_t *topology);
+ #endif
+ 
+@@ -299,7 +352,7 @@ SweetCPU::start(IOService *provider)
+ 		panic("TULIP CPU: PMI routing is not implemented");
+ 	}
+ 
+-#if defined(VINCE)
 +#if defined(VINCE) && !defined(VINCE_TULIP)
-+	if (boot) {
-+		vince_cpu_clock_init();
-+		vm_offset_t marks = ml_io_map(0x913F0000, 0x1000);
-+		if (marks) {
-+			for (int i = 0; i < 8; i++) {
-+				((volatile uint64_t *)marks)[0x100 + i] = 0;
-+			}
-+			for (int i = 0; i < 32; i++) {
-+				((volatile uint64_t *)marks)[0x1c0 + i] = 0;
-+			}
-+			vince_smp_mark_va = (volatile uint64_t *)marks;
-+		}
-+	}
+ 	if (boot) {
+ 		vince_cpu_clock_init();
+ 		vm_offset_t marks = ml_io_map(0x913F0000, 0x1000);
+@@ -313,6 +366,11 @@ SweetCPU::start(IOService *provider)
+ 			vince_smp_mark_va = (volatile uint64_t *)marks;
+ 		}
+ 	}
 +#elif defined(VINCE_TULIP)
 +	/* tulip: no MSM8953 clock tree and no 0x913F0000 mark page; the boot CPU still reports its MHz. */
 +	if (boot && cpu->cpu_id < 8) {
 +		gVinceMHz[cpu->cpu_id] = vince_cpu_mhz();
 +	}
-+#endif
-+	/*
-+	 * Boot CPU: re-enter through cpu_machine_init -> PE_cpu_machine_init. Secondary: cpu_start -> startCPU
-+	 * (PSCI CPU_ON); the CPU then runs initCPU(true) itself.
-+	 */
-+	result = processor_start(machProcessor);
-+#if defined(VINCE)
-+	if (!boot) {
-+		uint64_t deadline;
-+		nanoseconds_to_deadline(NSEC_PER_SEC, &deadline);
-+		while (result == KERN_SUCCESS && getCPUState() != kIOCPUStateRunning && mach_absolute_time() < deadline) {
-+			IOSleep(1);
-+		}
-+		IOLog("SWEET CPU: cpu %u (MPIDR %#x) %s\n", cpu->cpu_id, fPhysId,
-+		    result != KERN_SUCCESS ? "not started" :
-+		    getCPUState() == kIOCPUStateRunning ? "running" : "did not come up within 1 s");
-+		os_atomic_store(&gVinceStartBusy, 0, release);
-+		registerService();
-+		finishStart(topology);
-+		return true;
-+	}
-+#endif
-+	if (result != KERN_SUCCESS || getCPUState() != kIOCPUStateRunning) {
-+		panic("SWEET CPU: processor_start failed: %d", result);
-+	}
-+#if defined(VINCE)
-+	os_atomic_store(&gVinceBootRegistered, 1, release);
-+	registerService();
-+	IOLog("SWEET CPU: boot CPU %u (MPIDR %#x) registered, SGI1 verified\n", getCPUNumber(), fPhysId);
-+	finishStart(topology);
-+#else
-+	ml_cpu_init_completed();
-+	cpusRunning();
-+	registerService();
-+	IOService::publishResource(gIOAllCPUInitializedKey, kOSBooleanTrue);
-+
-+	/* Announce completion only after registration, startup and SGI validation. */
-+	ml_set_max_cpus(topology->max_cpu_id + 1);
-+	IOLog("SWEET CPU: boot CPU %u registered, SGI1 verified, initialization complete\n",
-+	    getCPUNumber());
-+#endif
-+	return true;
-+}
-+
-+#if defined(VINCE)
-+/* The last CPU through start() (boot or secondary, whichever) announces that every CPU is initialized. */
-+void
-+SweetCPU::finishStart(const ml_topology_info_t *topology)
-+{
-+	if (os_atomic_inc(&gVinceStarted, relaxed) != topology->num_cpus) {
-+		return;
-+	}
-+	ml_cpu_init_completed();
-+	cpusRunning();
-+	IOService::publishResource(gIOAllCPUInitializedKey, kOSBooleanTrue);
-+	ml_set_max_cpus(topology->max_cpu_id + 1);
-+	IOLog("SWEET CPU: %u CPUs, initialization complete; MHz %u %u %u %u %u %u %u %u\n", topology->num_cpus,
-+	    gVinceMHz[0], gVinceMHz[1], gVinceMHz[2], gVinceMHz[3], gVinceMHz[4], gVinceMHz[5], gVinceMHz[6],
-+	    gVinceMHz[7]);
-+}
-+#endif
-+
-+void
-+SweetCPU::free(void)
-+{
-+	OSSafeReleaseNULL(cpuName);
-+	IOCPU::free();
-+}
-+
-+void
-+SweetCPU::initCPU(bool boot)
-+{
-+	if (!boot) {
-+		panic("SWEET CPU: resume is not implemented");
-+	}
-+	assert(cpu_number() == (int)getCPUNumber());
-+#if defined(VINCE)
-+	vince_smp_mark(0x31);
-+	if (getCPUNumber() < 8) {
-+		gVinceMHz[getCPUNumber()] = vince_cpu_mhz();
-+	}
+ #endif
+ 	/*
+ 	 * Boot CPU: re-enter through cpu_machine_init -> PE_cpu_machine_init. Secondary: cpu_start -> startCPU
+@@ -394,6 +452,34 @@ SweetCPU::initCPU(bool boot)
+ 	if (getCPUNumber() < 8) {
+ 		gVinceMHz[getCPUNumber()] = vince_cpu_mhz();
+ 	}
 +#if defined(VINCE_GIC_V3)
 +	/*
 +	 * This CPU's own redistributor frame: wake it, put SGIs/PPIs in Group 1 at priority 0xA0,
@@ -485,97 +145,22 @@ new file mode 100644
 +	}
 +	__builtin_arm_dmb(DMB_ISH);
 +#else
-+	if (!fBoot) {
-+		/* banked per CPU: SGI/PPI group 1, priority 0xA0, the timer PPI and SGI enables; then the CPU interface */
-+		*(volatile uint32_t *)(vince_gicd_base + 0x080) = 0xFFFFFFFF;
-+		for (unsigned int i = 0; i < 32; i += 4) {
-+			*(volatile uint32_t *)(vince_gicd_base + 0x400 + i) = 0xA0A0A0A0;
-+		}
-+		*(volatile uint32_t *)(vince_gicd_base + 0x100) = (1U << vince_vtimer_intid) | (1U << VINCE_IPI_SGI);
-+		*(volatile uint32_t *)(vince_gicc_base + 0x004) = 0xff;
-+		*(volatile uint32_t *)(vince_gicc_base + 0x008) = 0;
-+		*(volatile uint32_t *)(vince_gicc_base + 0x000) = 1;
-+		__builtin_arm_dsb(DSB_SY);
-+	}
-+	/* GICD_ITARGETSR0 reads back this CPU's own interface bit (banked) */
-+	fGicMask = *(volatile uint32_t *)(vince_gicd_base + 0x800) & 0xff;
-+	vince_smp_mark(0x32);
-+	if (fGicMask == 0) {
-+		panic("SWEET CPU: cpu %u has no GIC CPU interface bit", getCPUNumber());
-+	}
-+	__builtin_arm_dmb(DMB_ISH);
+ 	if (!fBoot) {
+ 		/* banked per CPU: SGI/PPI group 1, priority 0xA0, the timer PPI and SGI enables; then the CPU interface */
+ 		*(volatile uint32_t *)(vince_gicd_base + 0x080) = 0xFFFFFFFF;
+@@ -414,6 +500,7 @@ SweetCPU::initCPU(bool boot)
+ 	}
+ 	__builtin_arm_dmb(DMB_ISH);
+ #endif
 +#endif
-+#endif
-+#if defined(VINCE)
-+	/* per core at mark page word 0x110 + 4 * core: DAIF, GICD_ISPENDR0 / ISACTIVER0, GICC_HPPIR, ticks */
-+	uint64_t mpidr = __builtin_arm_rsr64("MPIDR_EL1");
-+	unsigned core = (unsigned)((mpidr & 0xff) + ((mpidr >> 8) & 0xff) * 4);
-+	volatile uint64_t *diag = vince_smp_mark_va && core < 8 ? vince_smp_mark_va + 0x110 + 4 * core : NULL;
-+	if (diag) {
-+		diag[0] = __builtin_arm_rsr64("DAIF") | ((uint64_t)ml_get_interrupts_enabled() << 32);
-+	}
-+#endif
-+#if defined(VINCE)
-+	if (!fBoot) {
-+		/*
-+		 * Secondaries get here from arm_init_cpu -> cpu_machine_init with interrupts masked (measured: DAIF 0x3c0),
-+		 * so the self-test below could never complete. Leave SGI1 pending instead: the CPU takes it when its
-+		 * idle loop unmasks interrupts, and cpu_signal_handler then clears SIGPdisabled.
-+		 */
-+		ml_broadcast_cpu_event(CPU_BOOTED, getCPUNumber());
-+		signalCPU(this);
-+		if (diag) {
-+			/* banked state as this CPU sees it (0108) */
-+			diag[1] = *(volatile uint32_t *)(vince_gicd_base + 0x080) |
-+			    ((uint64_t)*(volatile uint32_t *)(vince_gicd_base + 0x100) << 32);
-+			diag[2] = *(volatile uint32_t *)(vince_gicd_base + 0x200) |
-+			    ((uint64_t)*(volatile uint32_t *)(vince_gicd_base + 0x800) << 32);
-+			diag[3] = *(volatile uint32_t *)(vince_gicc_base + 0x000) |
-+			    ((uint64_t)*(volatile uint32_t *)(vince_gicc_base + 0x004) << 32);
-+		}
-+		vince_smp_mark(0x33);
-+		setCPUState(kIOCPUStateRunning);
-+		return;
-+	}
-+#endif
-+	assert(ml_get_interrupts_enabled());
-+	ml_broadcast_cpu_event(CPU_BOOTED, getCPUNumber());
-+#if defined(VINCE)
-+	vince_smp_mark(0x34);
-+#endif
-+
-+	/* A real GIC interrupt clears SIGPdisabled in cpu_signal_handler. */
-+	uint64_t deadline;
-+	nanoseconds_to_deadline(NSEC_PER_SEC, &deadline);
-+	signalCPU(this);
-+#if defined(VINCE)
-+	vince_smp_mark(0x35);
-+	uint64_t spins = 0;
-+#endif
-+	while (!ml_cpu_signal_is_enabled()) {
-+#if defined(VINCE)
-+		if (diag && (++spins & 0xfff) == 0) {
-+			diag[1] = *(volatile uint32_t *)(vince_gicd_base + 0x200) |
-+			    ((uint64_t)*(volatile uint32_t *)(vince_gicd_base + 0x300) << 32);
-+			diag[2] = *(volatile uint32_t *)(vince_gicc_base + 0x018) |
-+			    ((uint64_t)*(volatile uint32_t *)(vince_gicc_base + 0x000) << 32);
-+			diag[3] = spins;
-+		}
-+#endif
-+		if (mach_absolute_time() > deadline) {
-+			panic("SWEET CPU: SGI1 self-test timed out on cpu %u", getCPUNumber());
-+		}
-+		__asm__ volatile("yield");
-+	}
-+#if defined(VINCE)
-+	vince_smp_mark(0x33);
-+#endif
-+	setCPUState(kIOCPUStateRunning);
-+}
-+
-+void
-+SweetCPU::signalCPU(IOCPU *target)
-+{
+ #if defined(VINCE)
+ 	/* per core at mark page word 0x110 + 4 * core: DAIF, GICD_ISPENDR0 / ISACTIVER0, GICC_HPPIR, ticks */
+ 	uint64_t mpidr = __builtin_arm_rsr64("MPIDR_EL1");
+@@ -484,7 +571,28 @@ SweetCPU::initCPU(bool boot)
+ void
+ SweetCPU::signalCPU(IOCPU *target)
+ {
+-#if defined(VINCE)
 +#if defined(VINCE_GIC_V3)
 +	SweetCPU *t = OSDynamicCast(SweetCPU, target);
 +	if (t == NULL || t->fGicr == 0) {
@@ -598,74 +183,48 @@ new file mode 100644
 +	__builtin_arm_wsr64("ICC_SGI1R_EL1", sgi);
 +	__builtin_arm_isb(ISB_SY);
 +#elif defined(VINCE)
-+	SweetCPU *t = OSDynamicCast(SweetCPU, target);
-+	if (t == NULL || t->fGicMask == 0) {
-+		return;         /* not up yet: nothing to wake */
-+	}
-+	/* GICv2 SGIR: TargetListFilter 0 (the list), CPUTargetList, SGI number */
-+	__builtin_arm_dsb(DSB_ISHST);
-+	*(volatile uint32_t *)(vince_gicd_base + 0xf00) = (t->fGicMask << 16) | (VINCE_IPI_SGI << 0);
-+	__builtin_arm_dsb(DSB_ISHST);
-+	__builtin_arm_isb(ISB_SY);
-+#else
-+	/* Only the boot CPU is registered by this driver. */
-+	if (target != this || cpu_number() != (int)getCPUNumber()) {
-+		panic("SWEET CPU: secondary CPU signalling is not implemented");
-+	}
-+	uint64_t mpidr = __builtin_arm_rsr64("MPIDR_EL1");
-+	unsigned int aff0 = mpidr & 0xff;
-+	if (aff0 >= 16) {
-+		panic("SWEET CPU: SGI target requires unsupported range selector");
-+	}
-+	uint64_t sgi = (((mpidr >> 32) & 0xff) << 48) |
-+	    (((mpidr >> 16) & 0xff) << 32) |
-+	    (((mpidr >> 8) & 0xff) << 16) |
-+	    ((uint64_t)SWEET_IPI_SGI << 24) | (1ULL << aff0);
-+	__builtin_arm_dsb(DSB_ISHST);
-+	__builtin_arm_wsr64("ICC_SGI1R_EL1", sgi);
-+	__builtin_arm_isb(ISB_SY);
+ 	SweetCPU *t = OSDynamicCast(SweetCPU, target);
+ 	if (t == NULL || t->fGicMask == 0) {
+ 		return;         /* not up yet: nothing to wake */
+diff --git a/pexpert/arm/pe_fiq.c b/pexpert/arm/pe_fiq.c
+index c26cf92..f48aee7 100644
+--- a/pexpert/arm/pe_fiq.c
++++ b/pexpert/arm/pe_fiq.c
+@@ -26,6 +26,14 @@ static vm_offset_t gicd_base;
+ static vm_offset_t gicr_base;
+ static vm_offset_t gicr_size;
+ 
++#if defined(VINCE_TULIP)
++/* SweetCPU (the SMP bring-up) reaches the GICv3 through these; pe_init_fiq() fills them in. */
++vm_offset_t vince_gicd_base = 0;
++vm_offset_t vince_gicc_base = 0;
++vm_offset_t vince_gicr_base = 0;
++uint32_t vince_vtimer_intid = SWEET_VTIMER_INTID;
 +#endif
-+}
 +
-+kern_return_t
-+SweetCPU::startCPU(vm_offset_t start_paddr __unused, vm_offset_t arg_paddr __unused)
-+{
-+#if defined(VINCE)
-+	/* The reset vector finds this CPU's data by MPIDR (cpu_start set cpu_reset_handler and flushed it). */
-+	uint64_t entry = ml_static_vtop((vm_offset_t)&LowResetVectorBase);
-+	int64_t r = vince_psci(PSCI_CPU_ON_64, fPhysId, entry, 0);
-+	if (r != 0) {
-+		IOLog("SWEET CPU: PSCI CPU_ON(%#x, %#llx) = %lld\n", fPhysId, entry, r);
-+		return KERN_FAILURE;
-+	}
-+	return KERN_SUCCESS;
-+#else
-+	return KERN_NOT_SUPPORTED;
+ static uint32_t
+ _gic_read32(vm_offset_t addr)
+ {
+@@ -141,6 +149,14 @@ pe_init_fiq()
+ 		}
+ 
+ 		gicr_size = gicr_size_prop;
++
++#if defined(VINCE_TULIP)
++		vince_gicd_base = gicd_base;
++		vince_gicr_base = gicr_base;
++		vince_vtimer_intid = sweet_vtimer_intid;
++		kprintf("TULIP GICv3: GICD=%p GICR=%p (size %#llx), vtimer INTID %u\n",
++		    (void *)gicd_base, (void *)gicr_base, (uint64_t)gicr_size_prop, sweet_vtimer_intid);
 +#endif
-+}
-+
-+void
-+SweetCPU::quiesceCPU(void)
-+{
-+	panic("SWEET CPU: CPU quiesce is not implemented");
-+}
-+
-+void
-+SweetCPU::haltCPU(void)
-+{
-+	panic("SWEET CPU: CPU halt/suspend is not implemented");
-+}
-+
-+const OSSymbol *
-+SweetCPU::getCPUName(void)
-+{
-+	return cpuName;
-+}
-+#endif /* SWEET || VINCE */
+ 	}
+ 
+ 	// Find the redistributor for this processor
 diff --git a/pexpert/pexpert/arm64/VINCE.h b/pexpert/pexpert/arm64/VINCE.h
+index 2487a21..d074183 100644
 --- a/pexpert/pexpert/arm64/VINCE.h
 +++ b/pexpert/pexpert/arm64/VINCE.h
-@@ -36,6 +36,17 @@
+@@ -64,6 +64,17 @@
  #define TULIP_FB_HEIGHT           2280u
  #define TULIP_FB_STRIDE           4320u
  #define TULIP_FB_BLOCKS           5       /* 2 MiB blocks mapped for it (10 MiB >= 9.85 MiB) */
@@ -682,189 +241,4 @@ diff --git a/pexpert/pexpert/arm64/VINCE.h b/pexpert/pexpert/arm64/VINCE.h
 +#define TULIP_SMP_MAX_CPUS        8       /* 4 Silver + 4 Gold */
  #else
  #define HAS_GIC_V2                1
- #endif
-diff --git a/pexpert/arm/pe_fiq.c b/pexpert/arm/pe_fiq.c
-index 3ad743f..4cde12b 100644
---- a/pexpert/arm/pe_fiq.c
-+++ b/pexpert/arm/pe_fiq.c
-@@ -3,6 +3,7 @@
-  */
- 
- #include <stdint.h>
-+#include <libkern/section_keywords.h>
- #include <arm64/proc_reg.h>
- #include <kern/clock.h>
- #include <mach/mach_time.h>
-@@ -16,6 +17,11 @@
- #define GICR_WAKE_TIMEOUT_NS (1000000000ULL) // timeout for redistributor wakeup (default 1s)
- MACHINE_TIMEOUT(gicr_wake_timeout_ns, "gicr-wake-timeout", GICR_WAKE_TIMEOUT_NS, MACHINE_TIMEOUT_UNIT_NSEC, NULL);
- 
-+#if defined(SWEET) || defined(VINCE_TULIP)
-+/* Phone default; QEMU virt wires the architected virtual timer to INTID 27. */
-+SECURITY_READ_ONLY_LATE(uint32_t) sweet_vtimer_intid = SWEET_VTIMER_INTID;
-+#endif
-+
- static vm_offset_t gicd_base;
- static vm_offset_t gicr_base;
- static vm_offset_t gicr_size;
-@@ -96,6 +102,23 @@ pe_init_fiq()
- 			panic("%s: incorrect reg property size in GIC DT node; expecting 32 bytes but got %u bytes", __func__, prop_size);
- 		}
- 
-+#if defined(SWEET) || defined(VINCE_TULIP)
-+		/* Read only on the boot CPU, before the GIC and RO-late lockdown. */
-+		void const *timer_prop;
-+		unsigned int timer_size;
-+		if (SecureDTGetProperty(entry, "virtual-timer-intid", &timer_prop, &timer_size) == kSuccess) {
-+			if (timer_size != sizeof(uint32_t)) {
-+				panic("%s: invalid virtual-timer-intid size %u", __func__, timer_size);
-+			}
-+			uint32_t intid = *(const uint32_t *)timer_prop;
-+			if (intid < 16 || intid >= 32) {
-+				panic("%s: virtual timer INTID %u is not a PPI", __func__, intid);
-+			}
-+			sweet_vtimer_intid = intid;
-+		}
-+		kprintf("SWEET GIC: virtual timer INTID %u\n", sweet_vtimer_intid);
-+#endif
-+
- 		vm_offset_t soc_base_phys = pe_arm_get_soc_base_phys();
- 
- 		uint64_t const gicd_base_prop = ((uint64_t const *) prop)[0];
-@@ -118,6 +141,15 @@ pe_init_fiq()
- 		}
- 
- 		gicr_size = gicr_size_prop;
-+
-+#if defined(VINCE_TULIP)
-+		/* SweetCPU walks this to find every PE's redistributor for the secondaries. */
-+		vince_gicr_base = gicr_base;
-+		vince_gicd_base = gicd_base;
-+		vince_vtimer_intid = sweet_vtimer_intid;
-+		kprintf("TULIP GICv3: GICD=%p GICR=%p (size %#llx), vtimer INTID %u\n",
-+		    (void *)gicd_base, (void *)gicr_base, (uint64_t)gicr_size_prop, sweet_vtimer_intid);
-+#endif
- 	}
- 
- 	// Find the redistributor for this processor
-@@ -141,11 +173,25 @@ pe_init_fiq()
- 		}
- 	}
- 
-+#if defined(SWEET) || defined(VINCE_TULIP)
-+	/*
-+	 * Real hardware with two security states: Group 0 is TrustZone's and
-+	 * non-secure writes to it are ignored. Everything we own is Group 1 NS
-+	 * and arrives as an IRQ (see sleh_irq). GICR_IGROUPR0 reads as zero
-+	 * from the non-secure side even after this write; delivery still works.
-+	 */
-+	gicr_write32(GICR_IGROUPR0, 0xFFFFFFFF);
-+	for (unsigned int i = 0; i < 32; i += 4) {
-+		gicr_write32(GICR_IPRIORITYR0 + i, 0xA0A0A0A0);
-+	}
-+	gicr_write32(GICR_ISENABLER0, (1U << sweet_vtimer_intid) | (1U << SWEET_IPI_SGI));
-+#else
- 	// Configure timers and legacy FIQ to be group 0
- 	gicr_write32(GICR_IGROUPR0, 0x81FFFFFF);
- 
- 	// Enable PPI 27
- 	gicr_write32(GICR_ISENABLER0, (1 << 27));
-+#endif /* SWEET || VINCE_TULIP */
- 
- 	// Enable system register access
- 	uint64_t icc_sre = __builtin_arm_rsr64("ICC_SRE_EL1");
-@@ -153,8 +199,12 @@ pe_init_fiq()
- 	__builtin_arm_wsr64("ICC_SRE_EL1", icc_sre);
- 	__builtin_arm_isb(ISB_SY);
- 
-+#if defined(SWEET) || defined(VINCE_TULIP)
-+	__builtin_arm_wsr64("ICC_BPR1_EL1", 0);
-+#else
- 	// Set priority masks and binary point for group 0
- 	__builtin_arm_wsr64("ICC_BPR0_EL1", 0);
-+#endif /* SWEET || VINCE_TULIP */
- 	__builtin_arm_wsr64("ICC_PMR_EL1", 0xFF);
- 
- 	// Set EOI mode of this processor
-@@ -162,16 +212,81 @@ pe_init_fiq()
- 	icc_ctlr &= ~ICC_CTLR_EOIMODE;
- 	__builtin_arm_wsr64("ICC_CTLR_EL1", icc_ctlr);
- 
-+#if defined(SWEET) || defined(VINCE_TULIP)
-+	// ABL leaves only ARE_NS set; Linux writes ARE_NS | EnableGrp1A | EnableGrp1
-+	uint32_t gicd_ctlr = gicd_read32(GICD_CTLR);
-+	gicd_ctlr |= GICD_CTLR_ARE_NS | GICD_CTLR_ENABLEGRP1A | GICD_CTLR_ENABLEGRP1;
-+	gicd_write32(GICD_CTLR, gicd_ctlr);
-+	while (gicd_read32(GICD_CTLR) & GICD_CTLR_RWP) {
-+		;
-+	}
-+	__builtin_arm_wsr64("ICC_IGRPEN1_EL1", 1);
-+	__builtin_arm_isb(ISB_SY);
-+#else
- 	// Enable the forwarding of the vtimer interrupt
- 	uint32_t gicd_ctlr = gicd_read32(GICD_CTLR);
- 	gicd_ctlr |= GICD_CTLR_ENABLEGRP0;
- 	gicd_write32(GICD_CTLR, gicd_ctlr);
- 	__builtin_arm_wsr64("ICC_IGRPEN0_EL1", 1);
- 	__builtin_arm_isb(ISB_SY);
-+#endif /* SWEET || VINCE_TULIP */
- }
- #else
-+#if defined(VINCE)
-+vm_offset_t vince_gicd_base = 0;
-+vm_offset_t vince_gicc_base = 0;
-+uint32_t vince_vtimer_intid = VINCE_VTIMER_INTID;
-+#if defined(VINCE_TULIP)
-+vm_offset_t vince_gicr_base = 0;
-+#endif
-+#endif
- void
- pe_init_fiq()
- {
-+#if defined(VINCE)
-+	/*
-+	 * vince (MSM8953): ARM GICv2 MMIO controller.
-+	 */
-+	if (!vince_gicd_base) {
-+		DTEntry entry;
-+		if (SecureDTFindEntry("name", "interrupt-controller", &entry) == kSuccess) {
-+			uint64_t const *reg;
-+			unsigned int prop_size;
-+			if (SecureDTGetProperty(entry, "reg", (void const **)&reg, &prop_size) == kSuccess && prop_size >= 32) {
-+				vince_gicd_base = ml_io_map(reg[0], reg[1]);
-+				vince_gicc_base = ml_io_map(reg[2], reg[3]);
-+			}
-+			void const *timer_prop;
-+			if (SecureDTGetProperty(entry, "virtual-timer-intid", &timer_prop, &prop_size) == kSuccess && prop_size == sizeof(uint32_t)) {
-+				vince_vtimer_intid = *(const uint32_t *)timer_prop;
-+			}
-+		}
-+		if (!vince_gicd_base) {
-+			vince_gicd_base = ml_io_map(MSM8953_GICD_BASE, 0x1000);
-+		}
-+		if (!vince_gicc_base) {
-+			vince_gicc_base = ml_io_map(MSM8953_GICC_BASE, 0x1000);
-+		}
-+		kprintf("VINCE GICv2: GICD=%p GICC=%p vtimer INTID %u\n",
-+		    (void *)vince_gicd_base, (void *)vince_gicc_base, vince_vtimer_intid);
-+	}
-+
-+	/* Configure SGI 0..15 and PPI 16..31 as Group 1 NS and priority 0xA0 */
-+	*(volatile uint32_t *)(vince_gicd_base + 0x080) = 0xFFFFFFFF;
-+	for (unsigned int i = 0; i < 32; i += 4) {
-+		*(volatile uint32_t *)(vince_gicd_base + 0x400 + i) = 0xA0A0A0A0;
-+	}
-+	/* Enable virtual timer PPI (20) and SGI 1 */
-+	*(volatile uint32_t *)(vince_gicd_base + 0x100) = (1U << vince_vtimer_intid) | (1U << VINCE_IPI_SGI);
-+	/* Priority mask: allow all priority levels, binary point 0 */
-+	*(volatile uint32_t *)(vince_gicc_base + 0x004) = 0xff;
-+	*(volatile uint32_t *)(vince_gicc_base + 0x008) = 0;
-+	/* Enable CPU interface (bit 0) */
-+	*(volatile uint32_t *)(vince_gicc_base + 0x000) = 1;
-+	/* Enable Distributor (bit 0) */
-+	*(volatile uint32_t *)(vince_gicd_base + 0x000) = 1;
-+	__builtin_arm_dsb(DSB_ISH);
-+	__builtin_arm_isb(ISB_SY);
-+#endif /* VINCE */
- }
  #endif
