@@ -1,0 +1,57 @@
+diff --git a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+index 4ae9649..bba08fa 100644
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -2306,7 +2306,9 @@ sdhci_take_over(void)
+ 	sdhci_snapshot_standard("(post-HC-mode, pre-reset)");
+ 
+ 	/* Drain any stale PWRCTL request firmware or reset left behind */
++	printf("TULIP SDHCI: trace A: before pwrctl stale\n");
+ 	(void)sdhci_pwrctl_ack("stale", false);
++	printf("TULIP SDHCI: trace B: after pwrctl stale\n");
+ 
+ 	/* Save pre-reset host control, host control 2, timeout control */
+ 	handoff_ctrl = hc_rd8(SDHCI_HOST_CONTROL);
+@@ -2320,7 +2322,18 @@ sdhci_take_over(void)
+ 	 * Step 3: full reset of the HC block (LK sdhci_msm_init and Linux sdhci_init
+ 	 * do SOFT_RESET_ALL here). GCC clocks are outside the SDHCI reset domain.
+ 	 */
++	{
++		uint32_t noreset = 0;
++
++		if (PE_parse_boot_argn("noreset", &noreset, sizeof(noreset)) && noreset) {
++			printf("TULIP SDHCI: trace C: RESET_ALL skipped (noreset=1)\n");
++			reset_done = false;
++			goto reset_skipped;
++		}
++	}
++	printf("TULIP SDHCI: trace C: before RESET_ALL write\n");
+ 	hc_wr8(SDHCI_SOFTWARE_RESET, SDHCI_RESET_ALL);
++	printf("TULIP SDHCI: trace D: RESET_ALL written\n");
+ 	nanoseconds_to_absolutetime(RESET_TIMEOUT_NS, &deadline);
+ 	deadline += mach_absolute_time();
+ 	reset_done = false;
+@@ -2350,11 +2363,15 @@ sdhci_take_over(void)
+ 		return ETIMEDOUT;
+ #endif
+ 	}
++reset_skipped:
++	printf("TULIP SDHCI: trace E: after reset step\n");
+ 	/* RESET_ALL turns off bus power; acknowledge the BUS_OFF request */
+ 	(void)sdhci_pwrctl_ack("BUS_OFF", reset_done);
+ 
+ 	/* Re-assert vendor clock selection in case core reset affected it */
++	printf("TULIP SDHCI: trace F: before select_hc_clock\n");
+ 	sdhci_select_hc_clock();
++	printf("TULIP SDHCI: trace G: after select_hc_clock\n");
+ 
+ 	/* Restore host control registers saved before RESET_ALL */
+ 	hc_wr8(SDHCI_HOST_CONTROL, (uint8_t)(handoff_ctrl & ~SDHCI_CTRL_DMA_MASK));
+@@ -2365,6 +2382,7 @@ sdhci_take_over(void)
+ 		    "(HOST_CONTROL 0x%02x)\n", handoff_ctrl);
+ 	}
+ 
++	printf("TULIP SDHCI: trace H: host control restored\n");
+ 	/* Step 4: turn on 1.8V bus power and acknowledge BUS_ON request */
+ 	error = sdhci_set_bus_power();
+ 	if (error) {
