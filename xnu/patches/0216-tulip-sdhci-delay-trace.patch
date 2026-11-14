@@ -1,0 +1,35 @@
+diff --git a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -2495,7 +2495,9 @@ reset_skipped:
+ 	 * At 400 kHz, 1 ms is 400 clocks: far more than the 74 clocks the
+ 	 * eMMC needs after power-up/reset before CMD1.
+ 	 */
++	printf("TULIP SDHCI: trace I: before 1 ms delay\n");
+ 	delay(1000);
++	printf("TULIP SDHCI: trace J: after 1 ms delay\n");
+ 
+ 	/*
+ 	 * The card clock is live now, which is what RESET_ALL needed and did
+@@ -2503,6 +2505,11 @@ reset_skipped:
+ 	 * Reset the command and data paths here, with the clock running, so
+ 	 * the first real data transfer does not inherit ABL's last transfer.
+ 	 */
++	{
++		uint32_t ps_dbg = hc_rd(SDHCI_PRESENT_STATE);
++
++		printf("TULIP SDHCI: trace K: PRESENT_STATE read 0x%08x\n", ps_dbg);
++	}
+ 	printf("TULIP SDHCI: probe step 2: reset paths with the clock "
+ 	    "live (PRESENT_STATE 0x%08x)\n", hc_rd(SDHCI_PRESENT_STATE));
+ 	if (sdhci_reset_paths() == 0) {
+@@ -2518,7 +2525,9 @@ reset_skipped:
+ 	 * two resulting command timeouts (and their path resets) right
+ 	 * before CMD0. Only ask when CMD13 did not prove TRAN.
+ 	 */
++	printf("TULIP SDHCI: trace L: before CMD13\n");
+ 	error = sdhci_send_status(TULIP_CARD_RCA, &probe_r1);
++	printf("TULIP SDHCI: trace M: CMD13 returned %d\n", error);
+ 	if (!error) {
+ 		card_in_transfer =
+ 		    (probe_r1 & SDHCI_R1_STATE_MASK) ==
