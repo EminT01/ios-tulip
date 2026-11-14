@@ -1,0 +1,16 @@
+Trace the vendor clock register write that precedes the HC mode switch
+
+The eMMC boot stops right after the "GCC sdcc1_apps not mapped" line, so it
+is not yet known whether the hang is in the CORE_VENDOR_SPEC read or in the
+following write. Print the value about to be written to separate the two.
+
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -2188,6 +2188,7 @@
+             "PWRSAVE %u) -> board 0x%08x\n", vendor,
+             (vendor & CORE_HC_MCLK_SEL_MASK) >> 8, (vendor >> 1) & 1u,
+             CORE_VENDOR_SPEC_BOARD_VAL);
++        printf("TULIP SDHCI: writing VENDOR_SPEC 0x%08x\n", CORE_VENDOR_SPEC_BOARD_VAL);
+         hc_wr(CORE_VENDOR_SPEC, CORE_VENDOR_SPEC_BOARD_VAL);
+ 
+         /* Step 2: switch the core to SDHCI host controller mode */
