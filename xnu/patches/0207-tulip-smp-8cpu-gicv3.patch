@@ -1,6 +1,5 @@
 diff --git a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
 new file mode 100644
-index 0000000..b7c3bcb
 --- /dev/null
 +++ b/iokit/Kernel/arm/SweetCPU.cpp
 @@ -0,0 +1,659 @@
@@ -664,77 +663,12 @@ index 0000000..b7c3bcb
 +}
 +#endif /* SWEET || VINCE */
 diff --git a/pexpert/pexpert/arm64/VINCE.h b/pexpert/pexpert/arm64/VINCE.h
-new file mode 100644
-index 0000000..d074183
---- /dev/null
+--- a/pexpert/pexpert/arm64/VINCE.h
 +++ b/pexpert/pexpert/arm64/VINCE.h
-@@ -0,0 +1,94 @@
-+/*
-+ * Board config for Xiaomi Redmi 5 Plus ("vince", Qualcomm MSM8953 / Snapdragon 625)
-+ * 8x ARM Cortex-A53 ARMv8.0-A, GICv2 MMIO, 24-bit RGB888 display.
-+ */
-+
-+#ifndef _PEXPERT_ARM64_VINCE_H
-+#define _PEXPERT_ARM64_VINCE_H
-+
-+#define ARM64_ARCH_FAMILY         1
-+#define __ARM_ARCH__              8
-+#define __ARM_VMSA__              8
-+#define __ARM_VFP__               4
-+#define __ARM_COHERENT_CACHE__    1
-+#define __ARM_COHERENT_IO__       1
-+#define __ARM_DEBUG__             7
-+#define ARM_BOARD_WFE_TIMEOUT_NS  1000
-+#undef KERNEL_INTEGRITY_WT
-+#define NO_MONITOR                1
-+#define NO_ECORE                  1
-+
-+#define VINCE                     1
-+#define ARM_ARCH_TIMER
-+#define __ARM_ENABLE_SWAP__       1
-+#define __ARM_V8_CRYPTO_EXTENSIONS__ 1
-+
-+#undef __ARM_16K_PG__
-+#undef __ARM_PAN_AVAILABLE__
-+#undef __ARM_WKDM_POPCNT__
-+#undef __ARM64_PMAP_SUBPAGE_L1__
-+#undef ARM_PARAMETERIZED_PMAP
-+
-+#if defined(VINCE_TULIP)
-+/*
-+ * Redmi Note 6 Pro ("tulip", Qualcomm SDM636): Kryo 260 (A53/A73 class, ARMv8.0), GICv3 with two security
-+ * states (like sweet: Group 0 is TrustZone's, everything we own is Group 1 NS and arrives as an IRQ),
-+ * 4 KiB pages. Qualcomm numbers the architected timer PPIs 1/2/3/0, so CNTV is INTID 16 + 3 = 19.
-+ * GIC addresses and the timer INTID come from the ADT (/arm-io/gic), measured values are only fallbacks.
-+ */
-+#define HAS_GIC_V3                1
-+#define SWEET_VTIMER_INTID        19
-+#define SWEET_IPI_SGI             1
-+#define GICR_PE_SIZE              0x20000
-+#define GICD_CTLR                 0x0
-+#define GICD_CTLR_ENABLEGRP1      0x1
-+#define GICD_CTLR_ENABLEGRP1A     0x2
-+#define GICD_CTLR_ARE_NS          0x10
-+#define GICD_CTLR_RWP             0x80000000
-+#define GICR_TYPER                              0x08
-+#define GICR_WAKER                              0x14
-+#define GICR_IGROUPR0                           0x10080
-+#define GICR_ISENABLER0                         0x10100
-+#define GICR_IPRIORITYR0                        0x10400
-+#define GICR_TYPER_AFFINITY_VALUE_SHIFT         32
-+#define GICR_TYPER_LAST                         0x10
-+#define GICR_WAKER_PROCESSORSLEEP               0x2
-+#define GICR_WAKER_CHILDRENASLEEP               0x4
-+#define ICC_CTLR_EOIMODE                        0x2
-+#define ICC_SRE_SRE                             0x1
-+#define SDM636_GICD_BASE          0x17a00000ULL
-+#define SDM636_GICR_BASE          0x17b00000ULL
-+/* LK's continuous-splash framebuffer: 1080x2280, 32 bpp (B,G,R,X), stride 4320, 36 MiB reserved */
-+#define TULIP_FB_PHYS             0x9d400000ULL
-+#define TULIP_FB_WIDTH            1080u
-+#define TULIP_FB_HEIGHT           2280u
-+#define TULIP_FB_STRIDE           4320u
-+#define TULIP_FB_BLOCKS           5       /* 2 MiB blocks mapped for it (10 MiB >= 9.85 MiB) */
+@@ -36,6 +36,17 @@
+ #define TULIP_FB_HEIGHT           2280u
+ #define TULIP_FB_STRIDE           4320u
+ #define TULIP_FB_BLOCKS           5       /* 2 MiB blocks mapped for it (10 MiB >= 9.85 MiB) */
 +/*
 + * Tulip SMP: all eight Kryo 260 cores, one homogeneous cluster at a 4 KiB granule.
 + *  - logical 0-3 = Silver (Cortex-A53 class), MPIDR 0x000-0x003
@@ -746,23 +680,9 @@ index 0000000..d074183
 + */
 +#define TULIP_SMP                 1
 +#define TULIP_SMP_MAX_CPUS        8       /* 4 Silver + 4 Gold */
-+#else
-+#define HAS_GIC_V2                1
-+#endif
-+
-+#ifndef ASSEMBLER
-+#define PLATFORM_PANIC_LOG_DISABLED
-+#endif /* ! ASSEMBLER */
-+
-+#define VINCE_VTIMER_INTID        20      // Virtual timer PPI (DT index 4: 16 + 4 = 20)
-+#define VINCE_IPI_SGI             1       // SGI used for cross-CPU signals
-+
-+#define GIC_SPURIOUS_IRQ          1023    // IRQ no. for GIC spurious interrupt
-+
-+#define MSM8953_GICD_BASE         0x0b000000ULL
-+#define MSM8953_GICC_BASE         0x0b002000ULL
-+
-+#endif /* ! _PEXPERT_ARM64_VINCE_H */
+ #else
+ #define HAS_GIC_V2                1
+ #endif
 diff --git a/pexpert/arm/pe_fiq.c b/pexpert/arm/pe_fiq.c
 index 3ad743f..4cde12b 100644
 --- a/pexpert/arm/pe_fiq.c
