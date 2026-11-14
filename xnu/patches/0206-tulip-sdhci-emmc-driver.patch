@@ -9,11 +9,39 @@ diff --git a/bsd/conf/files b/bsd/conf/files
  bsd/dev/sweet_sample.c			standard
  bsd/dev/sweet_keys.c			standard
  bsd/dev/sweet_touch.c			standard
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -587,6 +587,16 @@
+ static int
+ sweet_ufs_init(void)
+ {
++	/*
++	 * TULIP: the eMMC root path is bsd/dev/tulip_sdhci.c (20xx), which owns
++	 * the /tulip-sdhci node, the host reset and the card identification.
++	 * This UFS reader only ever knew the /sweet-ufs node and the UFS card
++	 * protocol, so on this board it is dead weight that would report a
++	 * second, contradictory probe on the console. Compile the body out.
++	 */
++#if defined(VINCE_TULIP)
++	return ENXIO;
++#else
+ 	DTEntry node;
+ 	uintptr_t const *reg = NULL;
+ 	unsigned int size = 0;
+@@ -668,6 +678,7 @@
+ 	/* tulip/vince: those drivers are not built; FTS touch and USB come later. */
+ #endif
+ 	return 0;
++#endif /* !VINCE_TULIP */
+ }
+ 
+ /*
 diff --git a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/tulip_sdhci.c
-@@ -0,0 +1,4666 @@
+@@ -0,0 +1,4676 @@
 +/*
 + * TULIP (Redmi Note 6 Pro) internal eMMC 5.1 root device (polled SDHCI
 + * MSM v4, SDCC1).
@@ -1615,18 +1643,15 @@ new file mode 100644
 + * SDCC v4 core; 0 or all-ones means the block is unclocked (or the access
 + * never reached it), and then no register in either window can be trusted.
 + */
++static uint32_t mci_version_read;
++static uint32_t generics_read;
++
 +static int
 +sdhci_core_check(void)
 +{
-+#if defined(ARM64_BOARD_CONFIG_LAVENDER)
-+	uint16_t host_version = hc_rd16(SDHCI_HOST_VERSION);
-+	if (host_version == 0 || host_version == 0xffffu) {
-+		printf("TULIP SDHCI: SDCC v5 HOST_VERSION invalid: 0x%04x\n", host_version);
-+		return ENXIO;
-+	}
-+	printf("TULIP SDHCI: SDCC v5 core present (HOST_VERSION 0x%04x)\n", host_version);
-+	return 0;
-+#else
++	uint32_t mci_version = mci_version_read;
++	uint32_t generics = generics_read;
++
 +	if (mci_version == 0 || mci_version == 0xffffffffu) {
 +		printf("TULIP SDHCI: vendor core does not answer "
 +		    "(MCI_VERSION 0x%08x, GENERICS 0x%08x): GCC SDC1 clock "
@@ -1637,7 +1662,6 @@ new file mode 100644
 +	printf("TULIP SDHCI: core MCI_VERSION 0x%08x GENERICS 0x%08x\n",
 +	    mci_version, generics);
 +	return 0;
-+#endif
 +}
 +
 +/*
@@ -4285,14 +4309,28 @@ new file mode 100644
 +
 +	se.regs = ml_io_map(reg[0], reg[1]);
 +	/*
++	 * Publish the read-only core ID words once, before any register write.
++	 * On the SDM636 SDCC the legacy MCI window at +0x50/+0x70 answers while
++	 * LK's HC_MODE is still 0; sdhci_core_check() uses these two values to
++	 * tell a live, clocked block from one held in reset.
++	 */
++	mci_version_read = hc_rd(CORE_MCI_VERSION);
++	generics_read = hc_rd(CORE_GENERICS);
++	/*
 +	 * Only the GCC page holding sdcc1_apps_clk_src is needed (CMD_RCGR
 +	 * 0x42004 through CBCR 0x42018). Map it separately from the HC window;
 +	 * both live in device memory and are accessed uncached.
 +	 */
 +	se.gcc = tulip_gcc_map();
 +	if (se.gcc == 0) {
-+		printf("TULIP SDHCI: no mapping for GCC sdcc1_apps\n");
-+		return ENXIO;
++		/*
++		 * TULIP: not fatal. LK already runs sdcc1_apps_clk_src at a legal
++		 * identification rate, and the GCC block base on SDM636 is not the
++		 * one the whyred tree assumed, so a failed map only means the driver
++		 * cannot retune the rate later. The card protocol still works.
++		 */
++		printf("TULIP SDHCI: GCC sdcc1_apps not mapped, keeping the "
++		    "bootloader clock (no rate change possible)\n");
 +	}
 +	if (kmem_alloc_contig(kernel_map, &se.dma, BOUNCE_SIZE, PAGE_MASK, 0, 0,
 +	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) !=
