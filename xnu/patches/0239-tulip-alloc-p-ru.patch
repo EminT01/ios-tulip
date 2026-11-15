@@ -1,0 +1,21 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -2230,6 +2230,18 @@
+ 	}
+ 	proc_list_unlock();
+ 
++	/*
++	 * TULIP 0239: proc_prepareexit() also allocates p_ru; without it wait4()
++	 * with a rusage buffer returns ENOMEM and launchd aborts.
++	 */
++	if (!proc_is_shadow(p) && p->p_ru == NULL) {
++		struct rusage_superset *tulip_rup = zalloc_flags(zombie_zone, Z_WAITOK | Z_ZERO);
++		gather_rusage_info(p, &tulip_rup->ri, RUSAGE_INFO_CURRENT);
++		tulip_rup->ri.ri_phys_footprint = 0;
++		tulip_rup->ri.ri_proc_exit_abstime = mach_absolute_time();
++		p->p_ru = tulip_rup;
++	}
++
+ 	proc_refdrain(p);
+ 	printf("EXIT_PROBE D1_pre_refdrain pid=%d\n", proc_pid(p));
+ 	printf("EXIT_PROBE D2_post_refdrain pid=%d\n", proc_pid(p));
