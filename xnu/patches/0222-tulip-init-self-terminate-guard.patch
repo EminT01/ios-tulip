@@ -1,0 +1,24 @@
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -4667,8 +4667,19 @@
+ 	 * result in loosing the SIGKILL status.
+ 	 */
+ 	if (task_did_exec(old_task)) {
+-		/* Terminate the current task, since exec will start in new task */
+-		task_terminate_internal(old_task);
++		/*
++		 * TULIP 0222: for pid 1 old_task and new_task are the same task,
++		 * so "the exec moved to a new task, drop the old one" does not
++		 * apply: terminating it kills launchd itself. Keep it, but say so,
++		 * because the switch really should have created a new task here.
++		 */
++		if (proc_getpid(p) == 1) {
++			printf("TULIP EXEC: pid 1 exec, old_task %p new_task %p "
++			    "(same %d) - NOT terminating\n", (void *)old_task,
++			    (void *)new_task, old_task == new_task);
++		} else {
++			task_terminate_internal(old_task);
++		}
+ 	}
+ 
+ 	/* Release the thread ref returned by cloneproc/fork1 */
