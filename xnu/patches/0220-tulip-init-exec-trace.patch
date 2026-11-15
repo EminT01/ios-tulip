@@ -1,0 +1,51 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -1198,6 +1198,9 @@ exec_mach_imgact(struct image_params *imgp)
+ 	struct _posix_spawnattr *psa = NULL;
+ 	int                     spawn = (imgp->ip_flags & IMGPF_SPAWN);
+ 	const int               vfexec = 0;
++	if (proc_getpid(vfs_context_proc(imgp->ip_vfs_context)) == 1) {
++		printf("TULIP EXEC: exec_mach_imgact enter, magic 0x%x\n", mach_header->magic);
++	}
+ 	int                     exec = (imgp->ip_flags & IMGPF_EXEC);
+ 	os_reason_t             exec_failure_reason = OS_REASON_NULL;
+ 	boolean_t               reslide = FALSE;
+@@ -2225,6 +2228,9 @@ again:
+ 	}
+ 
+ 	error = exec_check_permissions(imgp);
++	if (proc_getpid(p) == 1) {
++		printf("TULIP EXEC: exec_check_permissions -> %d\n", error);
++	}
+ 	if (error) {
+ 		goto bad;
+ 	}
+@@ -4083,6 +4089,9 @@ do_fork1:
+ 	 * as 0 and pretends the call succeeded.
+ 	 */
+ 	error = exec_activate_image(imgp);
++	if (proc_getpid(p) == 1) {
++		printf("TULIP EXEC: exec_activate_image -> %d\n", error);
++	}
+ #if defined(ARM64_BOARD_CONFIG_VINCE)
+ 	if (error != 0) {
+ 		printf("TULIP exec failed %d for \"%.60s\"\n", error, imgp->ip_startargv ? imgp->ip_startargv : "?");
+@@ -5048,6 +5057,9 @@ __mac_execve(proc_t p, struct __mac_execve_args *uap, int32_t *retval __unused)
+ 	 * as 0 and pretends the call succeeded.
+ 	 */
+ 	error = exec_activate_image(imgp);
++	if (proc_getpid(p) == 1) {
++		printf("TULIP EXEC: exec_activate_image -> %d\n", error);
++	}
+ 	/* thread and task ref returned for vfexec case */
+ 
+ 	if (imgp->ip_new_thread != NULL) {
+@@ -6970,6 +6982,7 @@ load_init_program(proc_t p)
+ 	for (i = 0; i < sizeof(init_programs) / sizeof(init_programs[0]); i++) {
+ 		printf("load_init_program: attempting to load %s\n", init_programs[i]);
+ 		error = load_init_program_at_path(p, (user_addr_t)scratch_addr, init_programs[i]);
++		printf("TULIP EXEC: %s -> %d (comm %s)\n", init_programs[i], error, p->p_comm);
+ 		if (!error) {
+ 			return;
+ 		} else if (error != ENOENT) {
