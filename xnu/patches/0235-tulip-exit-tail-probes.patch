@@ -1,0 +1,37 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -2554,6 +2554,7 @@
+ 	}
+ 
+ 	proc_limitdrop(p);
++	printf("EXIT_PROBE M1_post_limitdrop pid=%d\n", pid);
+ 
+ #if DEVELOPMENT || DEBUG
+ 	proc_exit_lpexit_check(pid, PELS_POS_PRE_TASK_DETACH);
+@@ -2572,8 +2573,10 @@
+ 	proc_exit_lpexit_check(pid, PELS_POS_POST_TASK_DETACH);
+ #endif
+ 
++	printf("EXIT_PROBE M2_pre_knote pid=%d\n", pid);
+ 	knote_hint = NOTE_EXIT | (p->p_xstat & 0xffff);
+ 	proc_knote(p, knote_hint);
++	printf("EXIT_PROBE M3_post_knote pid=%d\n", pid);
+ 
+ 	/* mark the thread as the one that is doing proc_exit
+ 	 * no need to hold proc lock in uthread_free
+@@ -2648,6 +2651,7 @@
+ 		 * can depend on this
+ 		 */
+ 
++		printf("EXIT_PROBE M4_zombie pid=%d\n", pid);
+ 		psignal(pp, SIGCHLD);
+ 
+ 		/* and now wakeup the parent */
+@@ -2697,6 +2701,7 @@
+ 		throttle_lowpri_io(0);
+ 	}
+ 
++	printf("EXIT_PROBE M5_end pid=%d\n", pid);
+ 	proc_rele(pp);
+ #if DEVELOPMENT || DEBUG
+ 	proc_exit_lpexit_check(pid, PELS_POS_END);
