@@ -1,0 +1,13 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -2174,7 +2174,9 @@
+ 		proc_transend(p, 1);
+ 		/* Jetsam is in middle of calling proc_prepareexit, wait for it */
+ 		p->p_lflag |= P_LTERM;
+-		msleep(&p->exit_thread, &p->p_mlock, PWAIT, "proc_prepareexit_wait", NULL);
++		/* TULIP 0233: proc_prepareexit is skipped (see exit1_internal), so nobody
++		 * would ever wake this sleep: do not wait. */
++		printf("TULIP EXIT: pid %d skip prepareexit wait\n", proc_pid(p));
+ 	} else {
+ 		proc_transend(p, 1);
+ 	}
