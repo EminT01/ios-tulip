@@ -1,0 +1,44 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -2899,8 +2899,14 @@
+ int
+ wait4(proc_t q, struct wait4_args *uap, int32_t *retval)
+ {
++	int tulip_err;
+ 	__pthread_testcancel(1);
+-	return wait4_nocancel(q, (struct wait4_nocancel_args *)uap, retval);
++	tulip_err = wait4_nocancel(q, (struct wait4_nocancel_args *)uap, retval);
++	if (proc_getpid(q) == 1) {
++		printf("TULIP WAIT4: pid1 wait4(%d, opt 0x%x) -> err %d ret %d\n",
++		    uap->pid, uap->options, tulip_err, retval ? *retval : -1);
++	}
++	return tulip_err;
+ }
+ 
+ int
+@@ -2914,6 +2920,9 @@
+ 	struct _wait4_data *wait4_data;
+ 
+ 	AUDIT_ARG(pid, uap->pid);
++	if (proc_getpid(q) == 1) {
++		printf("TULIP WAIT4 enter: pid %d opt 0x%x\n", uap->pid, uap->options);
++	}
+ 
+ 	if (uap->pid == 0) {
+ 		uap->pid = -q->p_pgrpid;
+@@ -3161,8 +3170,14 @@
+ int
+ waitid(proc_t q, struct waitid_args *uap, int32_t *retval)
+ {
++	int tulip_err;
+ 	__pthread_testcancel(1);
+-	return waitid_nocancel(q, (struct waitid_nocancel_args *)uap, retval);
++	tulip_err = waitid_nocancel(q, (struct waitid_nocancel_args *)uap, retval);
++	if (proc_getpid(q) == 1) {
++		printf("TULIP WAITID: pid1 waitid(type %d, id %d, opt 0x%x) -> err %d\n",
++		    (int)uap->idtype, (int)uap->id, uap->options, tulip_err);
++	}
++	return tulip_err;
+ }
+ 
+ int
