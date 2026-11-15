@@ -1,9 +1,12 @@
 diff --git a/bsd/vfs/vfs_syscalls.c b/bsd/vfs/vfs_syscalls.c
 --- a/bsd/vfs/vfs_syscalls.c
 +++ b/bsd/vfs/vfs_syscalls.c
-@@ -4585,0 +4586,17 @@
+@@ -4583,6 +4583,23 @@
+ 		}
+ 	}
+ 
++	/* TULIP 0231: trace opens of early processes (pid<=4) */
 +	{
-+		/* TULIP 0231: trace opens of early processes (pid<=4) */
 +		static volatile int tulip_open_n;
 +		int tulip_pid = proc_getpid(p);
 +		if (tulip_pid <= 4 && tulip_open_n < 400) {
@@ -19,3 +22,6 @@ diff --git a/bsd/vfs/vfs_syscalls.c b/bsd/vfs/vfs_syscalls.c
 +			printf("TULIP OPEN: pid %d fl 0x%x '%s'\n", tulip_pid, uflags, tb);
 +		}
 +	}
+ 	if ((error = vn_open_auth(ndp, &flags, vap, authvp))) {
+ 		if (authvp != NULLVP) {
+ 			vnode_put(authvp);
