@@ -1,0 +1,17 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -6901,7 +6901,12 @@ static const char * init_programs[] = {
+ #if DEBUG
+ 	"/usr/appleinternal/sbin/launchd.debug",
+ #endif
+-#if DEVELOPMENT || DEBUG
++#if (DEVELOPMENT || DEBUG) && !defined(ARM64_BOARD_CONFIG_VINCE)
++	/*
++	 * TULIP: the iOS root has no launchd.development, and the failed exec
++	 * of it tears down the exec shadow proc through proc_exit() -- which
++	 * kills pid 1. Go straight to /sbin/launchd like the release kernel.
++	 */
+ 	"/usr/appleinternal/sbin/launchd.development",
+ #endif
+ 	"/sbin/launchd",
