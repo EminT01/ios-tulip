@@ -1,0 +1,24 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -2966,11 +2966,13 @@
+ 			    REAP_REPARENTED_TO_INIT : 0;
+ 
+ 			proc_list_unlock();
++			printf("TULIP WAIT4 W0 pre-mac\n");
+ #if CONFIG_MACF
+ 			if ((error = mac_proc_check_wait(q, p)) != 0) {
+ 				goto out;
+ 			}
+ #endif
++			printf("TULIP WAIT4 W1 post-mac\n");
+ 			retval[0] = proc_getpid(p);
+ 			if (uap->status) {
+ 				/* Legacy apps expect only 8 bits of status */
+@@ -2982,6 +2984,7 @@
+ 					goto out;
+ 				}
+ 			}
++			printf("TULIP WAIT4 W2 post-status\n");
+ 			if (uap->rusage) {
+ 				if (p->p_ru == NULL) {
+ 					error = ENOMEM;
