@@ -1,0 +1,83 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -2711,6 +2711,10 @@
+ 	struct pgrp *pg;
+ 	kauth_cred_t cred;
+ 	boolean_t shadow_proc = proc_is_shadow(child);
++	pid_t tulip_rpid = proc_getpid(child);
++	if (tulip_rpid > 1 && tulip_rpid < 6) {
++		printf("TULIP REAP R0 pid %d\n", tulip_rpid);
++	}
+ 
+ 	if (flags & REAP_LOCKED) {
+ 		proc_list_unlock();
+@@ -2791,6 +2795,9 @@
+ #pragma clang diagnostic pop
+ 
+ 	proc_knote_drain(child);
++	if (tulip_rpid > 1 && tulip_rpid < 6) {
++		printf("TULIP REAP R1 pid %d\n", tulip_rpid);
++	}
+ 
+ 	child->p_xstat = 0;
+ 	if (!shadow_proc && child->p_ru) {
+@@ -2823,6 +2830,9 @@
+ 	(void)chgproccnt(kauth_cred_getruid(proc_ucred(child)), -1);
+ 
+ 	os_reason_free(child->p_exit_reason);
++	if (tulip_rpid > 1 && tulip_rpid < 6) {
++		printf("TULIP REAP R2 pid %d\n", tulip_rpid);
++	}
+ 
+ 	proc_list_lock();
+ 
+@@ -2851,14 +2861,23 @@
+ 	child->p_proc_ro = proc_ro_release_proc(child->p_proc_ro);
+ 
+ 	proc_list_unlock();
++	if (tulip_rpid > 1 && tulip_rpid < 6) {
++		printf("TULIP REAP R3 pid %d\n", tulip_rpid);
++	}
+ 
+ 	pgrp_rele(pg);
++	if (tulip_rpid > 1 && tulip_rpid < 6) {
++		printf("TULIP REAP R4 pid %d\n", tulip_rpid);
++	}
+ 	if (child->p_proc_ro != NULL) {
+ 		proc_ro_free(child->p_proc_ro);
+ 		child->p_proc_ro = NULL;
+ 	}
+ 	kauth_cred_set(&cred, NOCRED);
+ 	fdt_destroy(child);
++	if (tulip_rpid > 1 && tulip_rpid < 6) {
++		printf("TULIP REAP R5 pid %d\n", tulip_rpid);
++	}
+ 	lck_mtx_destroy(&child->p_mlock, &proc_mlock_grp);
+ 	lck_mtx_destroy(&child->p_ucred_mlock, &proc_ucred_mlock_grp);
+ #if CONFIG_DTRACE
+@@ -2866,6 +2885,9 @@
+ #endif
+ 	lck_spin_destroy(&child->p_slock, &proc_slock_grp);
+ 	proc_wait_release(child);
++	if (tulip_rpid > 1 && tulip_rpid < 6) {
++		printf("TULIP REAP R6 pid %d\n", tulip_rpid);
++	}
+ 
+ 	if ((flags & REAP_LOCKED) && (flags & REAP_DROP_LOCK) == 0) {
+ 		proc_list_lock();
+@@ -2974,6 +2996,7 @@
+ 			reap_flags_t reap_flags = (p->p_listflag & P_LIST_DEADPARENT) ?
+ 			    REAP_REPARENTED_TO_INIT : 0;
+ 
++			printf("TULIP WAIT4 zombie found pid %d\n", proc_getpid(p));
+ 			proc_list_unlock();
+ #if CONFIG_MACF
+ 			if ((error = mac_proc_check_wait(q, p)) != 0) {
+@@ -3036,6 +3059,7 @@
+ 			}
+ 
+ 			/* Clean up */
++			printf("TULIP WAIT4 pre-reap\n");
+ 			(void)reap_child_locked(q, p, reap_flags);
+ 
+ 			return 0;
