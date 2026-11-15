@@ -1,0 +1,44 @@
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -124,6 +124,7 @@
+ #include <kern/task.h>
+ #include <corpses/task_corpse.h>
+ #include <kern/thread.h>
++#include <kern/clock.h>
+ #include <kern/thread_call.h>
+ #include <kern/sched_prim.h>
+ #include <kern/assert.h>
+@@ -2128,6 +2129,32 @@ proc_exit(proc_t p)
+ 	uth = current_uthread();
+ 	printf("EXIT_PROBE A_entry pid=%d\n", proc_pid(p));
+ 
++	if (proc_pid(p) == 1) {
++		/*
++		 * TULIP: launchd is going away and the panic screen clears the
++		 * console, so print why and hold the screen for 90 s first.
++		 */
++		uint64_t span, deadline;
++		char *why = PROC_HAS_EXITREASON(p) ?
++		    exit_reason_get_string_desc(p->p_exit_reason) : NULL;
++
++		printf("TULIP INIT: pid 1 (%s) exiting: p_xstat 0x%x csflags 0x%x\n",
++		    p->p_comm, p->p_xstat, proc_getcsflags(p));
++		if (PROC_HAS_EXITREASON(p)) {
++			printf("TULIP INIT: exit reason ns %u code 0x%llx: %s\n",
++			    p->p_exit_reason->osr_namespace,
++			    p->p_exit_reason->osr_code, why ? why : "(none)");
++		} else {
++			printf("TULIP INIT: no exit reason (signal %d, status %d)\n",
++			    WTERMSIG(p->p_xstat), WEXITSTATUS(p->p_xstat));
++		}
++		nanoseconds_to_absolutetime(90ull * NSEC_PER_SEC, &span);
++		deadline = mach_absolute_time() + span;
++		while (mach_absolute_time() < deadline) {
++			__builtin_arm_isb(0xf);
++		}
++	}
++
+ 	proc_lock(p);
+ 	proc_transstart(p, 1, 0);
+ 	if (!(p->p_lflag & P_LEXIT)) {
