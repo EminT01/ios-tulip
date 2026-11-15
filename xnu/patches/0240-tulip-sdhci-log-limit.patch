@@ -1,0 +1,41 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -695,6 +695,19 @@
+ }
+ 
+ /*
++ * TULIP 0240: once the card gets confused every command fails and the console
++ * floods; show the first errors in full, then only every 1000th.
++ */
++static bool
++tulip_sd_log_ok(void)
++{
++	static volatile uint32_t n;
++	uint32_t v = ++n;
++
++	return v <= 12 || (v % 1000) == 0;
++}
++
++/*
+  * Record how long the command frame took. Probe step 2 uses it to prove the
+  * GCC RCG write reached the card: CMD0 takes ~0.5 us at the inherited
+  * 384 MHz and ~130 us at 400 kHz, independent of whether the card answers.
+@@ -764,6 +777,7 @@
+ 		if (st & SDHCI_INT_ERR) {
+ 			sdhci_cmd_stamp(start);
+ 			hc_wr(SDHCI_INT_STATUS, st);
++			if (tulip_sd_log_ok())
+ 			printf("TULIP SDHCI: command %u failed (arg 0x%08x, "
+ 			    "INT_STATUS 0x%08x%s%s%s%s, PRESENT_STATE "
+ 			    "0x%08x, %llu ns)\n", index, arg, st,
+@@ -1112,7 +1126,9 @@
+ 	if (!open_ended) {
+ 		return;
+ 	}
+-	printf("TULIP SDHCI: recover: stopping an open-ended transfer\n");
++	if (tulip_sd_log_ok()) {
++		printf("TULIP SDHCI: recover: stopping an open-ended transfer\n");
++	}
+ 	(void)sdhci_stop_transmission();
+ 	(void)sdhci_reset_paths();
+ }
