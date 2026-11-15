@@ -1,0 +1,72 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -2199,6 +2199,9 @@ exec_activate_image(struct image_params *imgp)
+ 
+ again:
+ 	error = namei(ndp);
++	if (proc_getpid(p) == 1) {
++		printf("TULIP EXEC: namei(%s) -> %d\n", excpath, error);
++	}
+ 	if (error) {
+ 		if (error == ERESTART) {
+ 			error = EINTR;
+diff --git a/osfmk/kern/task.c b/osfmk/kern/task.c
+--- a/osfmk/kern/task.c
++++ b/osfmk/kern/task.c
+@@ -2825,6 +2825,21 @@ extern void task_set_can_use_secluded_mem_locked(
+ 	boolean_t       can_use_secluded_mem);
+ #endif /* CONFIG_SECLUDED_MEMORY */
+ 
++/* TULIP: who is terminating pid 1? One line of raw return addresses. */
++extern unsigned OSBacktrace(void **bt, unsigned maxAddrs);
++static void
++tulip_report_init_kill(const char *what)
++{
++	void *bt[12] = { 0 };
++	unsigned n = OSBacktrace(bt, 12), i;
++
++	printf("TULIP KILL: %s on pid 1, callers:", what);
++	for (i = 0; i < n; i++) {
++		printf(" %lx", (unsigned long)bt[i] & 0xfffffffffffUL);
++	}
++	printf("\n");
++}
++
+ #if MACH_ASSERT
+ int debug4k_panic_on_terminate = 0;
+ #endif /* MACH_ASSERT */
+@@ -2832,6 +2847,9 @@ kern_return_t
+ task_terminate_internal(
+ 	task_t                  task)
+ {
++	if (task_pid(task) == 1) {
++		tulip_report_init_kill("task_terminate_internal");
++	}
+ 	thread_t                        thread, self;
+ 	task_t                          self_task;
+ 	boolean_t                       interrupt_save;
+diff --git a/osfmk/kern/thread_act.c b/osfmk/kern/thread_act.c
+--- a/osfmk/kern/thread_act.c
++++ b/osfmk/kern/thread_act.c
+@@ -215,6 +215,20 @@ thread_terminate_internal(
+ {
+ 	kern_return_t           result = KERN_SUCCESS;
+ 
++	if (task_pid(get_threadtask(thread)) == 1) {
++		printf("TULIP KILL: thread_terminate_internal on pid 1 thread, callers:");
++		{
++			void *bt[12] = { 0 };
++			extern unsigned OSBacktrace(void **b, unsigned m);
++			unsigned n = OSBacktrace(bt, 12), i;
++
++			for (i = 0; i < n; i++) {
++				printf(" %lx", (unsigned long)bt[i] & 0xfffffffffffUL);
++			}
++		}
++		printf("\n");
++	}
++
+ 	thread_mtx_lock(thread);
+ 
+ 	if (thread->active) {
