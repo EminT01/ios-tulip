@@ -1,0 +1,72 @@
+--- a/osfmk/kern/task.c
++++ b/osfmk/kern/task.c
+@@ -2940,6 +2940,9 @@
+ 	task_hold_locked(task);
+ 	task->active = FALSE;
+ 	ipc_task_disable(task);
++	if (task_pid(task) > 1 && task_pid(task) < 6) {
++		printf("TULIP TT1 pid %d\n", task_pid(task));
++	}
+ 
+ #if CONFIG_TELEMETRY
+ 	/*
+@@ -2966,6 +2969,9 @@
+ 
+ 	proc_set_task_policy(task, TASK_POLICY_ATTRIBUTE,
+ 	    TASK_POLICY_TERMINATED, TASK_POLICY_ENABLE);
++	if (task_pid(task) > 1 && task_pid(task) < 6) {
++		printf("TULIP TT2 pid %d\n", task_pid(task));
++	}
+ 
+ 	/* Early object reap phase */
+ 
+@@ -2984,6 +2990,9 @@
+ 	 *	Destroy all synchronizers owned by the task.
+ 	 */
+ 	task_synchronizer_destroy_all(task);
++	if (task_pid(task) > 1 && task_pid(task) < 6) {
++		printf("TULIP TT3 pid %d\n", task_pid(task));
++	}
+ 
+ 	/*
+ 	 *	Clear the watchport boost on the task.
+@@ -2994,6 +3003,9 @@
+ 	 *	Destroy the IPC space, leaving just a reference for it.
+ 	 */
+ 	ipc_space_terminate(task->itk_space);
++	if (task_pid(task) > 1 && task_pid(task) < 6) {
++		printf("TULIP TT4 pid %d\n", task_pid(task));
++	}
+ 
+ #if 00
+ 	/* if some ledgers go negative on tear-down again... */
+@@ -3041,10 +3053,19 @@
+ 	}
+ #endif /* MACH_ASSERT */
+ 
++	if (task_pid(task) > 1 && task_pid(task) < 6) {
++		printf("TULIP TT45 pid %d\n", task_pid(task));
++	}
+ 	vm_map_terminate(task->map);
++	if (task_pid(task) > 1 && task_pid(task) < 6) {
++		printf("TULIP TT5 pid %d\n", task_pid(task));
++	}
+ 
+ 	/* release our shared region */
+ 	vm_shared_region_set(task, NULL);
++	if (task_pid(task) > 1 && task_pid(task) < 6) {
++		printf("TULIP TT55 pid %d\n", task_pid(task));
++	}
+ 
+ #if __has_feature(ptrauth_calls)
+ 	task_set_shared_region_id(task, NULL);
+@@ -3094,6 +3115,9 @@
+ 	/*
+ 	 * Get rid of the task active reference on itself.
+ 	 */
++	if (task_pid(task) > 1 && task_pid(task) < 6) {
++		printf("TULIP TT6 pid %d\n", task_pid(task));
++	}
+ 	task_deallocate_grp(task, TASK_GRP_INTERNAL);
+ 
+ 	return KERN_SUCCESS;
