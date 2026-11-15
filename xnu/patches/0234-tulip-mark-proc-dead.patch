@@ -1,0 +1,21 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -2216,6 +2216,18 @@
+ 	 * already active.  MAY BLOCK!
+ 	 */
+ 
++	/*
++	 * TULIP 0234: proc_prepareexit() is skipped, so the proc was never moved
++	 * to zombproc and P_REF_DEAD was never set; proc_refdrain() asserts it.
++	 */
++	proc_list_lock();
++	if (!proc_list_exited(p)) {
++		LIST_REMOVE(p, p_list);
++		LIST_INSERT_HEAD(&zombproc, p, p_list);
++		os_atomic_or(&p->p_refcount, P_REF_DEAD, relaxed);
++	}
++	proc_list_unlock();
++
+ 	proc_refdrain(p);
+ 	printf("EXIT_PROBE D1_pre_refdrain pid=%d\n", proc_pid(p));
+ 	printf("EXIT_PROBE D2_post_refdrain pid=%d\n", proc_pid(p));
