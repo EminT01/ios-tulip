@@ -1,0 +1,15 @@
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -5226,9 +5226,9 @@
+ 			 * switch leaves old_task == new_task, so "drop the old task"
+ 			 * would kill launchd itself.
+ 			 */
+-			if (proc_getpid(p) == 1) {
+-				printf("TULIP EXEC: pid 1, not terminating old_task %p "
+-				    "(same as new %d)\n", (void *)old_task,
++			if (task_pid(old_task) == 1) {
++				printf("TULIP EXEC: refusing to terminate init task "
++				    "%p (same as new %d)\n", (void *)old_task,
+ 				    old_task == new_task);
+ 			} else {
+ 				task_terminate_internal(old_task);
