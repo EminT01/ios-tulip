@@ -1,0 +1,25 @@
+--- a/bsd/vfs/vfs_syscalls.c
++++ b/bsd/vfs/vfs_syscalls.c
+@@ -4583,6 +4583,22 @@
+ 		}
+ 	}
+ 
++	{
++		/* TULIP 0231: trace opens of early processes */
++		static volatile int tulip_open_n;
++		if (proc_getpid(p) <= 4 && tulip_open_n < 300) {
++			char tb[96];
++			size_t tl = 0;
++			tb[0] = 0;
++			if (ndp->ni_segflg == UIO_SYSSPACE) {
++				strlcpy(tb, CAST_DOWN(char *, ndp->ni_dirp), sizeof(tb));
++			} else {
++				(void)copyinstr(ndp->ni_dirp, tb, sizeof(tb), &tl);
++			}
++			tulip_open_n++;
++			printf("TULIP OPEN: pid %d fl 0x%x '%s'\n", proc_getpid(p), uflags, tb);
++		}
++	}
+ 	if ((error = vn_open_auth(ndp, &flags, vap, authvp))) {
+ 		if (authvp != NULLVP) {
+ 			vnode_put(authvp);
