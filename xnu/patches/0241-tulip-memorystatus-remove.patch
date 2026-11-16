@@ -1,0 +1,13 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -2224,6 +2224,10 @@
+ 	 */
+ 	proc_list_lock();
+ 	if (!proc_list_exited(p)) {
++#if CONFIG_MEMORYSTATUS
++		/* TULIP 0241: drop the proc from the jetsam bands before it is freed */
++		proc_memorystatus_remove(p);
++#endif
+ 		LIST_REMOVE(p, p_list);
+ 		LIST_INSERT_HEAD(&zombproc, p, p_list);
+ 		os_atomic_or(&p->p_refcount, P_REF_DEAD, relaxed);
