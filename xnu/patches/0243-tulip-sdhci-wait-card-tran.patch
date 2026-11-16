@@ -1,0 +1,65 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -1133,6 +1133,38 @@
+ 	(void)sdhci_reset_paths();
+ }
+ 
++static int sdhci_send_status(uint32_t rca, uint32_t *r1);
++
++/*
++ * TULIP 0243: the SDHCI core does not wait for the card's programming busy
++ * phase after a write, and the next command then times out (every write
++ * failed once, the retry worked). Ask the card with CMD13 until it is back
++ * in Transfer and ready for data, like Linux's card_busy_detect().
++ */
++static void
++tulip_wait_card_tran(void)
++{
++	uint64_t deadline;
++	uint32_t r1 = 0;
++
++	nanoseconds_to_absolutetime(500ull * 1000 * 1000, &deadline);
++	deadline += mach_absolute_time();
++	for (;;) {
++		if (sdhci_send_status(TULIP_CARD_RCA, &r1) != 0) {
++			return;
++		}
++		if ((r1 & SDHCI_R1_STATE_MASK) ==
++		    (SDHCI_R1_STATE_TRAN << 9) &&
++		    (r1 & SDHCI_R1_READY_FOR_DATA)) {
++			return;
++		}
++		if (mach_absolute_time() > deadline) {
++			return;
++		}
++		delay(100);
++	}
++}
++
+ /*
+  * Polled PIO read of count 512-byte blocks. index is 18 (multi-block) or
+  * 8/17 (single block). Data is assembled from the FIFO port, 128 words per
+@@ -1671,6 +1703,7 @@
+ 		sdhci_recover(index == 25);
+ 		return error;
+ 	}
++	tulip_wait_card_tran();
+ 	return 0;
+ }
+ 
+@@ -3756,6 +3789,7 @@
+ 			    (unsigned long long)lba, error, attempt + 1,
+ 			    TULIP_IO_RETRIES);
+ 		}
++		tulip_wait_card_tran();
+ 		delay(TULIP_IO_RETRY_DELAY_US);
+ 	}
+ 	return error;
+@@ -3788,6 +3822,7 @@
+ 		if (!error || attempt >= TULIP_IO_RETRIES) {
+ 			return error;
+ 		}
++		tulip_wait_card_tran();
+ 		delay(TULIP_IO_RETRY_DELAY_US);
+ 	}
+ 
