@@ -1,0 +1,12 @@
+--- a/bsd/vm/vm_unix.c
++++ b/bsd/vm/vm_unix.c
+@@ -498,7 +498,8 @@
+ 	    vm_map_offset_t, s,
+ 	    vm_map_offset_t, e,
+ 	    vm_map_offset_t, lowest_unnestable_addr);
+-	printf("%s[%d] triggered unnest of range 0x%qx->0x%qx of DYLD shared region in VM map %p. While not abnormal for debuggers, this increases system memory footprint until the target exits.\n", current_proc()->p_comm, proc_getpid(current_proc()), (uint64_t)s, (uint64_t)e, (void *) VM_KERNEL_ADDRPERM(m));
++	/* TULIP 0246: console noise (dozens of lines per process), silenced */
++	(void)0;
+ }
+ 
+ uint64_t
