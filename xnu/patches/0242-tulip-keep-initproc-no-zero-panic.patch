@@ -1,0 +1,35 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -2706,8 +2706,14 @@
+ 		 * and the proc struct cannot be used for wakeups as well.
+ 		 * It is safe to use p here as this is system reap
+ 		 */
+-		reap_child_locked(pp, p,
+-		    REAP_DEAD_PARENT | REAP_LOCKED | REAP_DROP_LOCK);
++		if (p == initproc) {
++			/* TULIP 0242: never free initproc: launchd's threads still use it */
++			p->p_listflag &= ~P_LIST_WAITING;
++			proc_list_unlock();
++		} else {
++			reap_child_locked(pp, p,
++			    REAP_DEAD_PARENT | REAP_LOCKED | REAP_DROP_LOCK);
++		}
+ 	}
+ 	if (uth->uu_lowpri_window) {
+ 		/*
+--- a/osfmk/kern/zalloc.c
++++ b/osfmk/kern/zalloc.c
+@@ -3107,7 +3107,12 @@
+ 		return;
+ 	}
+ 	if (memcmp_zero_ptr_aligned((void *)elem, size)) {
+-		zalloc_uaf_panic(zone, elem, size);
++		/* TULIP 0242: a stale write into a freed element must not panic the boot */
++		static const bool tulip_zero_panic = false;
++		if (tulip_zero_panic) {
++			zalloc_uaf_panic(zone, elem, size);
++		}
++		bzero((void *)elem, size);
+ 	}
+ 	if (flags & Z_PCPU) {
+ 		for (size_t i = zpercpu_count(); --i > 0;) {
