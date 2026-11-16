@@ -1,0 +1,35 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -2127,6 +2127,32 @@
+ 	int knote_hint;
+ 
+ 	uth = current_uthread();
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_VINCE)
++	/*
++	 * TULIP 0244: the CRASH report lives in proc_prepareexit(), which is
++	 * skipped here, so a crashing daemon (launchd!) left no trace. Print it
++	 * from proc_exit on the crashing thread instead.
++	 */
++	{
++		static volatile int tulip_crash_n;
++
++		if (p == current_proc() && WIFSIGNALED(p->p_xstat) &&
++		    WTERMSIG(p->p_xstat) != SIGKILL && tulip_crash_n < 40) {
++			extern void sweet_crash_log(const char *, int, int, uint64_t, uint64_t);
++			tulip_crash_n++;
++			sweet_crash_log(p->p_comm, proc_getpid(p), WTERMSIG(p->p_xstat),
++			    ((uint64_t)uth->uu_exception << 32) | (uint32_t)uth->uu_code,
++			    uth->uu_subcode);
++			if (PROC_HAS_EXITREASON(p)) {
++				char *tdesc = exit_reason_get_string_desc(p->p_exit_reason);
++				printf("CRASH %s reason ns %u code 0x%llx: %s\n", p->p_comm,
++				    p->p_exit_reason->osr_namespace,
++				    p->p_exit_reason->osr_code,
++				    tdesc != NULL ? tdesc : "(none)");
++			}
++		}
++	}
++#endif
+ 	printf("EXIT_PROBE A_entry pid=%d\n", proc_pid(p));
+ 
+ 	if (proc_pid(p) == 1) {
