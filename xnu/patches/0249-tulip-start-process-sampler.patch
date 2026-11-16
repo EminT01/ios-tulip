@@ -1,0 +1,19 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -854,6 +854,7 @@
+ 
+ static int sdhci_reset_paths(void);
+ static int sdhci_enable_card_clock(void);
++extern void sweet_sample_start(void);
+ static bool sdhci_ext_csd_sane(void);
+ static void sdhci_ext_csd_clear(void);
+ 
+@@ -4581,6 +4582,8 @@
+ 	tulip_log_start();
+ 	/* After the log: the TULIP FB lines belong in the SYSTEM ring. */
+ 	tulip_fb_test();
++	/* TULIP 0249: backtraces of backboardd/SpringBoard (boot-arg sweetsample), first one after 90 s */
++	sweet_sample_start();
+ 	return 0;
+ }
+ 
