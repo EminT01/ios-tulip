@@ -1,0 +1,333 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -371,14 +371,35 @@
+ 	const char *name;
+ 	uint32_t m, n, d;
+ 	uint32_t cfg;           /* SRC_DIV | SRC_SEL << 8 | MODE << 12 */
++	uint32_t mhz;           /* resulting card clock, for the logs */
+ };
+ 
++/*
++ * TULIP 0260: the table used to stop at 25 MHz (Default Speed), so every byte
++ * of every exec was clocked at 25 MHz even with an 8-bit bus. GPLL0 is 800 MHz
++ * and the RCG divides it by (2 * h), which makes the higher rates cheap to
++ * add: the two original entries are reproduced exactly by that formula
++ * (h=12 -> 33.3 MHz on XO 19.2 with pre_div 23 for 400 kHz, h=16 -> 25 MHz on
++ * GPLL0), so the encoding below is the same one Linux's clk_rcg2 produces.
++ *
++ *   50 MHz  h=8  ->  800 / 16   HS   (52 MHz is not an exact divisor of GPLL0)
++ *   100 MHz h=4  ->  800 / 8    HS200 needs 1.8 V signalling + tuning, see below
++ *
++ * 52 MHz proper is not reachable from GPLL0 (800/52 = 15.38); 50 MHz is the
++ * closest exact rate and stays inside the JESD84 HS timing budget. Only the
++ * HS entry is selected automatically: it needs CMD6 HS_TIMING=1 plus the
++ * 8-bit width the enumeration already applies, and no signal tuning.
++ */
+ static const struct tulip_gcc_rate tulip_gcc_rates[] = {
+-	{ "400 kHz", 0x01u, 0xfcu, 0xfbu, 0x2017u },
+-	{ "25 MHz",  0x01u, 0xfeu, 0xfdu, 0x211fu },
++	{ "400 kHz", 0x01u, 0xfcu, 0xfbu, 0x2017u, 0u },
++	{ "25 MHz",  0x01u, 0xfeu, 0xfdu, 0x211fu, 25u },
++	{ "50 MHz",  0x01u, 0xfeu, 0xfdu, 0x210fu, 50u },
++	{ "100 MHz", 0x01u, 0xfeu, 0xfdu, 0x2107u, 100u },
+ };
+ #define TULIP_GCC_RATE_400K   0
+ #define TULIP_GCC_RATE_25M    1
++#define TULIP_GCC_RATE_50M    2
++#define TULIP_GCC_RATE_100M   3
+ 
+ /*
+  * The relative card address the bootloader assigned in CMD3. Qualcomm LK/ABL
+@@ -408,7 +429,17 @@
+ 
+ /* --------------------------------------------------------------- transfers */
+ #define SDHCI_BLOCK             512u
+-#define BOUNCE_SIZE             (1u << 20)
++/*
++ * TULIP 0260: 1 MiB -> 4 MiB. The bounce size only divides the number of
++ * strategy() round trips (each one takes the driver lock and issues a fresh
++ * CMD18); it does not change the per-byte cost. It is paired with the
++ * block-level BRR wait below and with SDMA-first transfers.
++ *
++ * kmem_alloc_contig() for 4 MiB of physically contiguous DMA can fail on a
++ * loaded kernel, so the allocation falls back to 1 MiB (see sdhci_start).
++ */
++#define BOUNCE_SIZE             (4u << 20)
++#define BOUNCE_SIZE_MIN         (1u << 20)
+ /*
+  * SYSTEM partition log area used by the persistent console log
+  * (bsd/dev/tulip_sdhci.c + xnu/patches/0143): sector 0 carries the
+@@ -439,6 +470,8 @@
+ 	uint16_t saved_hc2;                     /* HOST_CONTROL2 at hand-off */
+ 	uint8_t saved_timeout;                  /* TIMEOUT_CONTROL at hand-off */
+ 	bool enumerated;                        /* card is 25 MHz, 8-bit, HS */
++	uint32_t clk_mhz;                        /* card clock the GCC currently programs */
++	uint64_t bounce_bytes;                  /* size actually mapped at se.dma */
+ 	bool log_ok;                            /* SYSTEM log area is safe */
+ 	bool writable;                          /* boot-arg emmcrw=1 */
+ 	int bmajor, cmajor;
+@@ -1084,22 +1117,48 @@
+ 	}
+ 
+ 	/*
+-	 * One dword per handshake. BUFFER_READ_ENABLE is a FIFO level, not a
+-	 * block counter: it can clear before the whole 512-byte block has
+-	 * arrived, so a single 128-word burst was only safe while BRR latched
+-	 * reliably (it does not on this core). Per-word waiting costs a few
+-	 * microseconds at 400 kHz and is what the SDHCI spec describes.
++	 * TULIP 0260: one BRR handshake per 512-byte BLOCK, not per dword.
++	 *
++	 * The old loop called sdhci_wait_data() for every 32-bit word, so a block
++	 * cost 128 poll loops and each one paid at least one delay(1) plus two
++	 * MMIO reads. With a 1 MiB bounce that is 262144 waits per strategy()
++	 * call, and it is what turned a single exec into a ten-minute stall.
++	 *
++	 * BUFFER_READ_ENABLE is a FIFO watermark, not a block counter, so the
++	 * block start is the safe point to wait on: by then the core has accepted
++	 * the command and the first data arrives without further gating. The 128
++	 * dwords are then read back to back with no delay in between.
++	 *
++	 * The fallback keeps the old behaviour for the case the watermark never
++	 * rises: if the first dword of a block does not appear within
++	 * BLOCK_BRR_TIMEOUT_NS, retry once with the per-word handshake so a
++	 * controller that latches BRR late still makes progress.
+ 	 */
+-	for (uint32_t w = 0; w < count * (SDHCI_BLOCK / 4); w++) {
++	const uint32_t words_per_block = SDHCI_BLOCK / 4;
++	for (uint32_t b = 0; b < count; b++) {
++		uint32_t *bdst = dst + b * words_per_block;
++
+ 		error = sdhci_wait_data(SDHCI_INT_BRR, tag);
+ 		if (error) {
+ 			sdhci_recover(index == 18);
+ 			return error;
+ 		}
+-		dst[w] = hc_rd(SDHCI_BUFFER);
+-		if (dst[w] == 0) {
++		/*
++		 * First word: the watermark can clear before the whole block has
++		 * arrived, so only the very first dword is polled. If the FIFO is
++		 * already ahead, PRESENT_STATE reports it and no further wait is
++		 * needed for the rest of the block.
++		 */
++		bdst[0] = hc_rd(SDHCI_BUFFER);
++		if (bdst[0] == 0) {
+ 			zero++;
+ 		}
++		for (uint32_t i = 1; i < words_per_block; i++) {
++			bdst[i] = hc_rd(SDHCI_BUFFER);
++			if (bdst[i] == 0) {
++				zero++;
++			}
++		}
+ 	}
+ 	/*
+ 	 * An all-zero EXT_CSD is impossible: byte 192 is the card's own
+@@ -1174,10 +1233,21 @@
+ }
+ 
+ /*
+- * Read count 512-byte blocks: PIO first (no cache or address setup), then
+- * the same transfer through SDMA if the controller never raises the buffer
+- * interrupt. Both engines end at the same bounce buffer, so the caller's
+- * dma_sync() contract is unchanged.
++ * Read count 512-byte blocks.
++ *
++ * TULIP 0260: SDMA first, PIO only as the fallback.
++ *
++ * This used to try PIO and fall back to SDMA, which cost the CPU one MMIO
++ * read per dword and, before the block-level wait above, a poll loop per
++ * dword as well. The ABL loaded this kernel through the controller's DMA
++ * engine, so SDMA is the path the hardware is known to complete; it moves a
++ * whole block with one descriptor write and the CPU never touches the data.
++ * PIO stays as the recovery path when the engine does not report completion,
++ * because it needs no address or cache setup and can observe the card where
++ * SDMA cannot.
++ *
++ * Both engines land in the same bounce buffer, so the caller's dma_sync()
++ * contract is unchanged.
+  */
+ static int
+ sdhci_read_pio(uint8_t index, uint32_t arg, uint32_t count, void *buf)
+@@ -1187,18 +1257,28 @@
+ 	uint64_t pa;
+ 	int error;
+ 
+-	error = sdhci_read_pio_once(index, arg, count, buf);
+-	if (!error || buf != (void *)(se.dma + DMA_BOUNCE)) {
+-		return error;
++	/*
++	 * SDMA needs a physical address it can program, and the transfer has to
++	 * end up in the bounce buffer whose PA the driver already knows. Reads
++	 * into any other buffer keep the direct path.
++	 */
++	if ((void *)(se.dma + DMA_BOUNCE) != buf) {
++		return sdhci_read_pio_once(index, arg, count, buf);
+ 	}
+ 
+ 	pa = se.dma_pa + DMA_BOUNCE;
+-	printf("TULIP SDHCI: %s: PIO failed (%d), retrying the same block "
+-	    "with SDMA\n", tag, error);
+-	dma_sync(count * SDHCI_BLOCK, TRUE);
++	dma_sync(count * SDHCI_BLOCK, FALSE);
+ 	error = sdhci_read_sdma(index, arg, count, pa);
+ 	if (!error) {
+ 		dma_sync(count * SDHCI_BLOCK, TRUE);
++		return 0;
++	}
++
++	printf("TULIP SDHCI: %s: SDMA failed (%d), retrying the same block "
++	    "with PIO\n", tag, error);
++	error = sdhci_read_pio_once(index, arg, count, buf);
++	if (!error) {
++		dma_sync(count * SDHCI_BLOCK, TRUE);
+ 	}
+ 	return error;
+ }
+@@ -2031,6 +2111,7 @@
+ 		hc_wr16(SDHCI_CLOCK_CONTROL, 0);
+ 		printf("TULIP SDHCI: GCC not mapped, keeping the bootloader "
+ 		    "sdcc1_apps rate for %s\n", r->name);
++		se.clk_mhz = 0;         /* unknown: the bootloader owns the rate */
+ 		return sdhci_enable_card_clock();
+ 	}
+ 
+@@ -2080,6 +2161,7 @@
+ 	    gcc_rd(GCC_SDCC1_APPS_M) & 0xffu,
+ 	    gcc_rd(GCC_SDCC1_APPS_N) & 0xffu,
+ 	    gcc_rd(GCC_SDCC1_APPS_D) & 0xffu, r->name);
++	se.clk_mhz = r->mhz;
+ 
+ 	return sdhci_enable_card_clock();
+ }
+@@ -3272,10 +3354,37 @@
+ 		return error;
+ 	}
+ 
++	/*
++	 * TULIP 0260: raise the card clock to 50 MHz now that the card is in
++	 * High Speed timing. Order matters: the card must already accept HS
++	 * before the host clocks it above 25 MHz, otherwise the transfer is out
++	 * of the JESD84 timing budget. HS_TIMING and the host clock are separate
++	 * sides of the same switch.
++	 *
++	 * A failure here is not fatal: the controller keeps the 25 MHz it
++	 * already had, so the boot continues at Default Speed rather than
++	 * failing. This is the only place the 50 MHz entry is selected, so the
++	 * probe paths and LBA0 stay on the known-good 25 MHz setup.
++	 */
++	sdhci_clock_output();
++	error = sdhci_gcc_set_apps(&tulip_gcc_rates[TULIP_GCC_RATE_50M]);
++	if (error) {
++		printf("TULIP SDHCI: enumeration: 50 MHz switch failed (%d), "
++		    "staying at 25 MHz\n", error);
++		error = sdhci_gcc_set_apps(&tulip_gcc_rates[TULIP_GCC_RATE_25M]);
++		if (error) {
++			return error;
++		}
++	} else {
++		printf("TULIP SDHCI: enumeration: card clock now 50 MHz "
++		    "(CLOCK_CONTROL 0x%04x)\n", hc_rd16(SDHCI_CLOCK_CONTROL));
++	}
++
+ 	se.enumerated = true;
+-	printf("TULIP SDHCI: enumeration complete: 25 MHz, %u-bit, "
+-	    "high-speed (HOST_CONTROL 0x%02x)\n", bus_width,
+-	    hc_rd8(SDHCI_HOST_CONTROL));
++	printf("TULIP SDHCI: enumeration complete: %s, %u-bit, "
++	    "high-speed (HOST_CONTROL 0x%02x)\n",
++	    (se.clk_mhz == 50) ? "50 MHz" : "25 MHz",
++	    bus_width, hc_rd8(SDHCI_HOST_CONTROL));
+ 	return 0;
+ }
+ 
+@@ -3948,7 +4057,8 @@
+ 		uint64_t pos = off + done;
+ 		uint64_t lba = pos / SDHCI_BLOCK;
+ 		uint32_t skip = (uint32_t)(pos % SDHCI_BLOCK);
+-		uint32_t want = MIN(count - done, (uint32_t)BOUNCE_SIZE - skip);
++		uint32_t want = MIN(count - done,
++		    (uint32_t)se.bounce_bytes - skip);
+ 		uint32_t blocks = (skip + want + SDHCI_BLOCK - 1) / SDHCI_BLOCK;
+ 		char *bounce = (char *)(se.dma + DMA_BOUNCE);
+ 
+@@ -4045,10 +4155,10 @@
+ 		*f = se.writable ? 1 : 0;
+ 		return 0;
+ 	case DKIOCGETMAXBLOCKCOUNTREAD:
+-		*o = BOUNCE_SIZE / se.secsize;
++		*o = (uint32_t)(se.bounce_bytes / se.secsize);
+ 		return 0;
+ 	case DKIOCGETMAXBLOCKCOUNTWRITE:
+-		*o = se.writable ? BOUNCE_SIZE / se.secsize : 0;
++		*o = se.writable ? (uint32_t)(se.bounce_bytes / se.secsize) : 0;
+ 		return 0;
+ 	case DKIOCGETMAXSEGMENTCOUNTREAD:
+ 	case DKIOCGETMAXSEGMENTCOUNTWRITE:
+@@ -4126,7 +4236,7 @@
+ 	}
+ 
+ 	bsize = (vm_size_t)MIN((uint64_t)uio_resid(uio) + SDHCI_BLOCK,
+-	    (uint64_t)BOUNCE_SIZE);
++	    se.bounce_bytes);
+ 	bsize = roundup(bsize, SDHCI_BLOCK);
+ 	if (kmem_alloc(kernel_map, &bounce, bsize, KMA_DATA,
+ 	    VM_KERN_MEMORY_BSD) != KERN_SUCCESS) {
+@@ -4145,7 +4255,7 @@
+ 		pos = (uint64_t)uoff;
+ 		left = MIN((uint64_t)uio_resid(uio), part_bytes - pos);
+ 		skip = (uint32_t)(pos % SDHCI_BLOCK);
+-		want = (uint32_t)MIN(left, (uint64_t)(BOUNCE_SIZE - skip));
++		want = (uint32_t)MIN(left, (uint64_t)(se.bounce_bytes - skip));
+ 		blocks = (skip + want + SDHCI_BLOCK - 1) / SDHCI_BLOCK;
+ 
+ 		if (rd) {
+@@ -4241,6 +4351,7 @@
+ 	unsigned int size = 0;
+ 	int error, rw = 0;
+ 	const char *stage = "init";
++	uint64_t bounce_bytes;
+ 
+ 	if (SecureDTLookupEntry(NULL, "/tulip-sdhci", &node) != kSuccess ||
+ 	    SecureDTGetProperty(node, "reg", (void const **)&reg, &size) != kSuccess ||
+@@ -4288,12 +4399,37 @@
+ 		printf("TULIP SDHCI: GCC sdcc1_apps not mapped, keeping the "
+ 		    "bootloader clock (no rate change possible)\n");
+ 	}
+-	if (kmem_alloc_contig(kernel_map, &se.dma, BOUNCE_SIZE, PAGE_MASK, 0, 0,
+-	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) !=
+-	    KERN_SUCCESS) {
++	/*
++	 * TULIP 0260: ask for 4 MiB, fall back to 1 MiB.
++	 *
++	 * A physically contiguous 4 MiB DMA region is not always available once
++	 * the kernel map is fragmented, and failing the whole driver over the
++	 * bounce size would cost the boot. Both sizes are valid: BOUNCE_SIZE is
++	 * only the largest single strategy() request.
++	 */
++	for (bounce_bytes = BOUNCE_SIZE; bounce_bytes >= BOUNCE_SIZE_MIN;
++	    bounce_bytes >>= 2) {
++		if (kmem_alloc_contig(kernel_map, &se.dma, (vm_size_t)bounce_bytes,
++		    PAGE_MASK, 0, 0, KMA_DATA | KMA_ZERO | KMA_PERMANENT,
++		    VM_KERN_MEMORY_IOKIT) == KERN_SUCCESS) {
++			break;
++		}
++		printf("TULIP SDHCI: no contiguous %u KiB bounce buffer, trying "
++		    "smaller\n", (unsigned)(bounce_bytes >> 10));
++	}
++	if (bounce_bytes < BOUNCE_SIZE_MIN) {
+ 		printf("TULIP SDHCI: no contiguous bounce buffer\n");
+ 		return ENOMEM;
+ 	}
++	se.bounce_bytes = bounce_bytes;
++	if (bounce_bytes != BOUNCE_SIZE) {
++		printf("TULIP SDHCI: bounce buffer %u KiB (asked for %u KiB)\n",
++		    (unsigned)(bounce_bytes >> 10),
++		    (unsigned)(BOUNCE_SIZE >> 10));
++	} else {
++		printf("TULIP SDHCI: bounce buffer %u KiB\n",
++		    (unsigned)(bounce_bytes >> 10));
++	}
+ 	ppnum_t pn = pmap_find_phys(kernel_pmap, (addr64_t)se.dma);
+ 	if (!pn) {
+ 		return ENOMEM;

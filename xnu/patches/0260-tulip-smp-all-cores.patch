@@ -1,0 +1,100 @@
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -242,6 +242,7 @@
+ }
+ static uint32_t gVinceBootRegistered;   /* the boot CPU finished processor_start */
+ static uint32_t gVinceStarted;
++static uint32_t gVinceCompleted;        /* SMP has been published once */
+ static uint32_t gVinceStartBusy;        /* one secondary at a time through register + start + wait */
+ #endif
+ 
+@@ -293,11 +294,23 @@
+ 		panic("TULIP CPU: only single-CPU bring-up is supported");
+ 	}
+ #else
+-	/* secondaries register after the boot CPU (its cpu_data and pset come first) */
++	/*
++	 * TULIP 0260: the secondaries used to give up after 500 x 10 ms and
++	 * return false, which dropped them silently: they then never reached
++	 * finishStart(), so the "every CPU checked in" counter never matched
++	 * num_cpus and ml_cpu_init_completed() was never called. The result was
++	 * exactly the symptom seen on the device: cpus=1 and cpus=8 behaved the
++	 * same, because the extra CPUs that did start were discarded here.
++	 *
++	 * The wait itself is still needed (the boot CPU must publish its cpu_data
++	 * and pset first), but it is now bounded generously and, crucially, a
++	 * CPU that times out still reports itself instead of vanishing.
++	 */
+ 	for (int i = 0; !boot && !os_atomic_load(&gVinceBootRegistered, acquire); i++) {
+-		if (i == 500) {
+-			IOLog("TULIP CPU: cpu %u gave up waiting for the boot CPU\n", cpu->cpu_id);
+-			return false;
++		if (i == 3000) {                /* 30 s */
++			IOLog("TULIP CPU: cpu %u: boot CPU never registered, "
++			    "starting anyway\n", cpu->cpu_id);
++			break;
+ 		}
+ 		IOSleep(10);
+ 	}
+@@ -416,20 +429,56 @@
+ }
+ 
+ #if defined(VINCE)
+-/* The last CPU through start() (boot or secondary, whichever) announces that every CPU is initialized. */
++/*
++ * TULIP 0260: publish SMP as soon as the boot CPU and every CPU that actually
++ * reached initCPU() are accounted for.
++ *
++ * This used to fire only on an exact "== num_cpus" match. A single secondary
++ * that failed to come up (or returned early) made the count unreachable, so
++ * ml_cpu_init_completed() / cpusRunning() were never called and the kernel
++ * stayed uniprocessor with no error at all - the boot looked normal while
++ * seven cores sat idle.
++ *
++ * Now the first CPU through here waits a bounded time for the others and then
++ * publishes whatever it has, so one dead core can no longer keep the whole
++ * machine single-core. The counter is still reported so the log says exactly
++ * how many cores actually made it.
++ */
+ void
+ SweetCPU::finishStart(const ml_topology_info_t *topology)
+ {
+-	if (os_atomic_inc(&gVinceStarted, relaxed) != topology->num_cpus) {
++	uint32_t seen = os_atomic_inc(&gVinceStarted, relaxed);
++
++	if (os_atomic_cmpxchg(&gVinceCompleted, 0, 1, acquire)) {
++		/* somebody else already published SMP */
++		IOLog("TULIP CPU: cpu %u joined (%u/%u)\n", getCPUNumber(),
++		    seen, topology->num_cpus);
+ 		return;
+ 	}
++
++	/*
++	 * First publisher: give the remaining CPUs a bounded window so the normal
++	 * case publishes the full count, then proceed regardless.
++	 */
++	for (int i = 0; i < 3000 &&
++	    os_atomic_load(&gVinceStarted, acquire) < topology->num_cpus; i++) {
++		IOSleep(10);
++	}
++	seen = os_atomic_load(&gVinceStarted, acquire);
++
+ 	ml_cpu_init_completed();
+ 	cpusRunning();
+ 	IOService::publishResource(gIOAllCPUInitializedKey, kOSBooleanTrue);
+ 	ml_set_max_cpus(topology->max_cpu_id + 1);
+-	IOLog("TULIP CPU: %u CPUs, initialization complete; MHz %u %u %u %u %u %u %u %u\n", topology->num_cpus,
+-	    gVinceMHz[0], gVinceMHz[1], gVinceMHz[2], gVinceMHz[3], gVinceMHz[4], gVinceMHz[5], gVinceMHz[6],
+-	    gVinceMHz[7]);
++	if (seen < topology->num_cpus) {
++		IOLog("TULIP CPU: %u of %u CPUs came up; starting SMP with %u\n",
++		    seen, topology->num_cpus, seen);
++	} else {
++		IOLog("TULIP CPU: %u CPUs, initialization complete; MHz %u %u %u %u %u %u %u %u\n",
++		    topology->num_cpus, gVinceMHz[0], gVinceMHz[1], gVinceMHz[2],
++		    gVinceMHz[3], gVinceMHz[4], gVinceMHz[5], gVinceMHz[6],
++		    gVinceMHz[7]);
++	}
+ }
+ #endif
+ 
