@@ -1,0 +1,91 @@
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -52,29 +52,45 @@
+ 
+ extern void sweet_sample_task(const char *name, int pid, task_t task);  /* osfmk/kern/exception.c */
+ 
++/*
++ * TULIP 0255: proc_iterate() takes a reference on every process and can wait
++ * forever on one that our exit-path shortcuts left half-dead, which would
++ * park this thread before it prints anything. Scan allproc under the list
++ * lock instead, then take a reference only on the wanted processes.
++ */
++#define SWEET_SAMPLE_MAX 8
+ static int
+-sweet_sample_count(proc_t p, __unused void *arg)
++sweet_sample_scan(int *pids, char names[][20])
+ {
+-	char name[32];
+-	proc_name(proc_pid(p), name, sizeof(name));
+-	if (sweet_sample_wanted(name) && proc_task(p) != TASK_NULL) {
+-		sweet_sample_hits++;
++	int n = 0;
++	proc_t p;
++
++	proc_list_lock();
++	LIST_FOREACH(p, &allproc, p_list) {
++		if (n < SWEET_SAMPLE_MAX && p->p_stat != SZOMB &&
++		    sweet_sample_wanted(p->p_comm)) {
++			pids[n] = proc_getpid(p);
++			strlcpy(names[n], p->p_comm, 20);
++			n++;
++		}
+ 	}
+-	return PROC_RETURNED;
++	proc_list_unlock();
++	return n;
+ }
+ 
+-static int
+-sweet_sample_proc(proc_t p, __unused void *arg)
++static void
++sweet_sample_run(int n, const int *pids, char names[][20])
+ {
+-	char name[32];
+-	proc_name(proc_pid(p), name, sizeof(name));
+-	if (sweet_sample_wanted(name)) {
+-		task_t task = proc_task(p);
+-		if (task != TASK_NULL) {
+-			sweet_sample_task(name, proc_pid(p), task);
++	for (int k = 0; k < n; k++) {
++		proc_t p = proc_find(pids[k]);
++		if (p != PROC_NULL) {
++			task_t task = proc_task(p);
++			if (task != TASK_NULL) {
++				sweet_sample_task(names[k], pids[k], task);
++			}
++			proc_rele(p);
+ 		}
+ 	}
+-	return PROC_RETURNED;
+ }
+ 
+ static void
+@@ -82,6 +98,8 @@
+ {
+ 	static int chan;
+ 	int quiet = 0;
++	int spids[SWEET_SAMPLE_MAX];
++	char snames[SWEET_SAMPLE_MAX][20];
+ 	if (!PE_parse_boot_argn("sweetsample", sweet_sample_names, sizeof(sweet_sample_names))) {
+ 		strlcpy(sweet_sample_names, "SpringBoard,backboardd", sizeof(sweet_sample_names));
+ 	}
+@@ -99,8 +117,7 @@
+ 	for (int i = 0, since_perf = 0; i < 100000; i++) {
+ 		uint64_t now_ns = 0, con_ns = 0, emmc_ns = 0;
+ 		sweet_console_muted = 0;
+-		sweet_sample_hits = 0;
+-		proc_iterate(PROC_ALLPROCLIST, sweet_sample_count, NULL, NULL, NULL);
++		sweet_sample_hits = sweet_sample_scan(spids, snames);
+ 		if (sweet_sample_hits > 0 || since_perf >= (quiet ? 4 : 10)) {
+ 			since_perf = 0;
+ 			absolutetime_to_nanoseconds(mach_absolute_time(), &now_ns);
+@@ -115,7 +132,7 @@
+ 		}
+ 		if (sweet_sample_hits > 0) {
+ 			printf("SMP --- sample %d\n", i);
+-			proc_iterate(PROC_ALLPROCLIST, sweet_sample_proc, NULL, NULL, NULL);
++			sweet_sample_run(sweet_sample_hits, spids, snames);
+ 			sweet_console_muted = 1;
+ 			(void)tsleep(&chan, PZERO, "sweetsmp", 100 * hz);
+ 			sweet_console_muted = 0;
