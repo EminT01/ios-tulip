@@ -1,0 +1,43 @@
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -24,6 +24,8 @@
+ extern int hz;
+ extern void sweet_sample_start(void);
+ 
++extern int sweet_console_muted;
++static int sweet_sample_hits;
+ static char sweet_sample_names[128];
+ 
+ static bool
+@@ -54,6 +56,7 @@
+ 	if (sweet_sample_wanted(name)) {
+ 		task_t task = proc_task(p);
+ 		if (task != TASK_NULL) {
++			sweet_sample_hits++;
+ 			sweet_sample_task(name, proc_pid(p), task);
+ 		}
+ 	}
+@@ -70,11 +73,21 @@
+ 	if (sweet_sample_names[0] == '-') {
+ 		return;
+ 	}
+-	(void)tsleep(&chan, PZERO, "sweetsmp", 90 * hz);
++	printf("TULIP SAMPLER: started for '%s', first sample in 60 s\n", sweet_sample_names);
++	(void)tsleep(&chan, PZERO, "sweetsmp", 60 * hz);
+ 	for (int i = 0; i < 40; i++) {
++		/* TULIP 0250: draw this sample, then freeze the console for 100 s so it can be photographed */
++		sweet_console_muted = 0;
+ 		printf("SMP --- sample %d\n", i);
++		sweet_sample_hits = 0;
+ 		proc_iterate(PROC_ALLPROCLIST, sweet_sample_proc, NULL, NULL, NULL);
+-		(void)tsleep(&chan, PZERO, "sweetsmp", 120 * hz);
++		if (sweet_sample_hits > 0) {
++			/* only freeze when a wanted process was actually sampled */
++			sweet_console_muted = 1;
++			(void)tsleep(&chan, PZERO, "sweetsmp", 100 * hz);
++			sweet_console_muted = 0;
++		}
++		(void)tsleep(&chan, PZERO, "sweetsmp", 20 * hz);
+ 	}
+ }
+ 
