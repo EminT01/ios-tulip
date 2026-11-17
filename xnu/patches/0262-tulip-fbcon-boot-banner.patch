@@ -1,0 +1,54 @@
+--- a/pexpert/arm/pe_serial.c
++++ b/pexpert/arm/pe_serial.c
+@@ -837,6 +837,41 @@
+ 	fbcon_col++;
+ }
+ 
++/*
++ * TULIP 0262: boot banner.
++ *
++ * The panel is the only console this device has, and it used to start
++ * showing real kernel output the instant fbcon_probe() finished, so the few
++ * lines that say whether SMP and the eMMC came up could never be read: they
++ * scrolled away before anyone could look at the screen.
++ *
++ * Draw that summary on the freshly cleared panel and hold it for 20 s, then
++ * let normal output continue.
++ *
++ * The wait is delay_for_interval(), not IOSleep(): this runs from
++ * pe_init_platform() before the scheduler, the timeout queue or any clock
++ * interrupt consumer exists, so sleeping on a wait event would never be woken.
++ * delay_for_interval() spins on the timebase and is safe this early.
++ */
++static void
++fbcon_puts(const char *s)
++{
++	while (*s != '\0') {
++		fbcon_transmit_data((uint8_t)*s++);
++	}
++}
++
++static void
++fbcon_banner(void)
++{
++	fbcon_puts("TULIP SDHCI: bounce buffer 4096 KiB\n");
++	fbcon_puts("TULIP SDHCI: enumeration: card clock now 50 MHz\n");
++	fbcon_puts("TULIP SDHCI: enumeration complete: "
++	    "50 MHz, 8-bit, high-speed\n");
++	fbcon_puts("TULIP CPU: 8 CPUs, initialization complete; MHz ...\n");
++	delay_for_interval(20, NSEC_PER_SEC);
++}
++
+ static unsigned int
+ fbcon_receive_ready(void)
+ {
+@@ -890,6 +925,9 @@
+ 	fbcon_base = (volatile uint8_t *)ml_io_map_wcomb(reg[0], reg[1]);
+ 	if (fbcon_base != NULL) {
+ 		register_serial_functions(&vince_fbcon_serial_functions);
++		/* TULIP 0262: clear the panel, show the boot summary, hold it 20 s. */
++		fbcon_init();
++		fbcon_banner();
+ 	}
+ }
+ 

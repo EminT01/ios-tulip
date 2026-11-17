@@ -290,44 +290,29 @@
  
  	if (SecureDTLookupEntry(NULL, "/tulip-sdhci", &node) != kSuccess ||
  	    SecureDTGetProperty(node, "reg", (void const **)&reg, &size) != kSuccess ||
-@@ -4288,12 +4399,37 @@
+@@ -4517,6 +4517,16 @@
  		printf("TULIP SDHCI: GCC sdcc1_apps not mapped, keeping the "
  		    "bootloader clock (no rate change possible)\n");
  	}
--	if (kmem_alloc_contig(kernel_map, &se.dma, BOUNCE_SIZE, PAGE_MASK, 0, 0,
--	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) !=
--	    KERN_SUCCESS) {
 +	/*
-+	 * TULIP 0260: ask for 4 MiB, fall back to 1 MiB.
++	 * TULIP 0261: the bounce buffer size now comes from the static array.
 +	 *
-+	 * A physically contiguous 4 MiB DMA region is not always available once
-+	 * the kernel map is fragmented, and failing the whole driver over the
-+	 * bounce size would cost the boot. Both sizes are valid: BOUNCE_SIZE is
-+	 * only the largest single strategy() request.
++	 * It used to be kmem_alloc_contig(); 0208 replaced that with the image
++	 * array below because the allocator never returned this early in
++	 * bsd_init. The array is sized by BOUNCE_SIZE, so raising BOUNCE_SIZE
++	 * (to 4 MiB) is the only thing that changes - nothing to allocate and
++	 * no smaller-size fallback to run.
 +	 */
-+	for (bounce_bytes = BOUNCE_SIZE; bounce_bytes >= BOUNCE_SIZE_MIN;
-+	    bounce_bytes >>= 2) {
-+		if (kmem_alloc_contig(kernel_map, &se.dma, (vm_size_t)bounce_bytes,
-+		    PAGE_MASK, 0, 0, KMA_DATA | KMA_ZERO | KMA_PERMANENT,
-+		    VM_KERN_MEMORY_IOKIT) == KERN_SUCCESS) {
-+			break;
-+		}
-+		printf("TULIP SDHCI: no contiguous %u KiB bounce buffer, trying "
-+		    "smaller\n", (unsigned)(bounce_bytes >> 10));
-+	}
-+	if (bounce_bytes < BOUNCE_SIZE_MIN) {
- 		printf("TULIP SDHCI: no contiguous bounce buffer\n");
- 		return ENOMEM;
- 	}
-+	se.bounce_bytes = bounce_bytes;
-+	if (bounce_bytes != BOUNCE_SIZE) {
-+		printf("TULIP SDHCI: bounce buffer %u KiB (asked for %u KiB)\n",
-+		    (unsigned)(bounce_bytes >> 10),
-+		    (unsigned)(BOUNCE_SIZE >> 10));
-+	} else {
-+		printf("TULIP SDHCI: bounce buffer %u KiB\n",
-+		    (unsigned)(bounce_bytes >> 10));
-+	}
++	se.bounce_bytes = sizeof(tulip_sdhci_bounce);
+ 	se.dma = (vm_offset_t)tulip_sdhci_bounce;
  	ppnum_t pn = pmap_find_phys(kernel_pmap, (addr64_t)se.dma);
  	if (!pn) {
+@@ -4524,6 +4534,8 @@
  		return ENOMEM;
+ 	}
+ 	se.dma_pa = ptoa_64(pn);
++	printf("TULIP SDHCI: bounce buffer %u KiB\n",
++	    (unsigned)(se.bounce_bytes >> 10));
+ 	printf("TULIP SDHCI: bounce buffer at pa 0x%llx\n", (unsigned long long)se.dma_pa);
+ 
+ 	lck_mtx_lock(&tulip_sdhci_lock);
