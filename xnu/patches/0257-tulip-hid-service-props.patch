@@ -1,6 +1,9 @@
 --- a/iokit/Kernel/arm/hid/SweetHID.cpp
 +++ b/iokit/Kernel/arm/hid/SweetHID.cpp
-@@ -80,0 +81,43 @@
+@@ -78,6 +78,49 @@
+ 	OSSafeReleaseNULL(transport);
+ 	OSSafeReleaseNULL(product);
+ 
 +	/*
 +	 * TULIP 0257: backboardd opens the service (IOServiceOpen returns 0x0) and
 +	 * then keeps asking for the queue/batching keys that
@@ -44,3 +47,6 @@
 +		svcProps->release();
 +	}
 +
+ 	OSDictionary *pair = OSDictionary::withCapacity(2);
+ 	OSArray *pairs = OSArray::withCapacity(1);
+ 	OSNumber *page = OSNumber::withNumber(getPrimaryUsagePage(), 32);
