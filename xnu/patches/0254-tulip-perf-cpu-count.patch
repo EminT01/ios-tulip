@@ -1,0 +1,20 @@
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -28,6 +28,7 @@
+ static int sweet_sample_hits;
+ extern uint64_t tulip_perf_con_ticks, tulip_perf_con_bytes, tulip_perf_emmc_ticks, tulip_perf_emmc_reads, tulip_perf_emmc_blocks;
+ extern uint64_t mach_absolute_time(void);
++extern unsigned int processor_avail_count, processor_count;
+ extern void absolutetime_to_nanoseconds(uint64_t abstime, uint64_t *result);
+ static char sweet_sample_names[128];
+ 
+@@ -105,7 +106,8 @@
+ 			absolutetime_to_nanoseconds(mach_absolute_time(), &now_ns);
+ 			absolutetime_to_nanoseconds(tulip_perf_con_ticks, &con_ns);
+ 			absolutetime_to_nanoseconds(tulip_perf_emmc_ticks, &emmc_ns);
+-			printf("TULIP PERF: up %llu s, console %llu ms (%llu bytes), eMMC %llu ms (%llu reads, %llu MiB)\n",
++			printf("TULIP PERF: cpus online %u/%u, up %llu s, console %llu ms (%llu bytes), eMMC %llu ms (%llu reads, %llu MiB)\n",
++			    processor_avail_count, processor_count,
+ 			    now_ns / 1000000000ULL, con_ns / 1000000ULL,
+ 			    (unsigned long long)tulip_perf_con_bytes, emmc_ns / 1000000ULL,
+ 			    (unsigned long long)tulip_perf_emmc_reads,
