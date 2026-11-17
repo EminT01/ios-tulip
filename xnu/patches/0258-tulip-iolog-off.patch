@@ -1,9 +1,18 @@
 --- a/iokit/Kernel/IOUserClient.cpp
 +++ b/iokit/Kernel/IOUserClient.cpp
-@@ -2612,0 +2613,2 @@
+@@ -2610,6 +2610,8 @@
+ static char sweet_iolog_names[128];
+ static int sweet_iolog_parsed;
+ static uint32_t sweet_iolog_lines;
 +/* TULIP 0258: line cap is a boot arg now; 0 keeps the old behaviour. */
 +static uint32_t sweet_iolog_max = 1200;
-@@ -2620,0 +2623,9 @@
+ 
+ static bool
+ sweet_iolog(char *name, size_t len)
+@@ -2618,9 +2620,21 @@
+ 		if (!PE_parse_boot_argn("sweetiolog", sweet_iolog_names, sizeof(sweet_iolog_names))) {
+ 			strlcpy(sweet_iolog_names, "backboardd,SpringBoard", sizeof(sweet_iolog_names));
+ 		}
 +		if (strcmp(sweet_iolog_names, "-") == 0 ||
 +		    strcmp(sweet_iolog_names, "off") == 0 ||
 +		    strcmp(sweet_iolog_names, "none") == 0) {
@@ -13,9 +22,13 @@
 +		if (PE_parse_boot_argn("sweetiologmax", &max, sizeof(max)) && max) {
 +			sweet_iolog_max = max;
 +		}
-@@ -2623 +2634,4 @@
+ 		sweet_iolog_parsed = 1;
+ 	}
 -	if (sweet_iolog_lines >= 1200) {
 +	if (sweet_iolog_names[0] == 0) {
 +		return false;
 +	}
 +	if (sweet_iolog_lines >= sweet_iolog_max) {
+ 		return false;
+ 	}
+ 	proc_selfname(name, (int)len);
