@@ -1,0 +1,104 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -658,6 +658,12 @@ tulip_gcc_map(void)
+ #define TULIP_SDC1_RCG_N       0x038u
+ #define TULIP_SDC1_RCG_D       0x03cu
+ 
++/*
++ * TULIP 0263: the SDC1 page tulip_sdc1_clock_on() maps, kept so the rate can be
++ * raised again later. 0 until that function has run (sdcclk=1).
++ */
++static vm_offset_t tulip_sdc1_va;
++
+ static void
+ tulip_sdc1_clock_on(void)
+ {
+@@ -675,6 +681,7 @@ tulip_sdc1_clock_on(void)
+ 		printf("TULIP SDHCI: cannot map GCC SDC1 page\n");
+ 		return;
+ 	}
++	tulip_sdc1_va = g;
+ 	r = (volatile uint32_t *)g;
+ 	printf("TULIP SDHCI: GCC SDC1 before: APPS_CBCR 0x%08x AHB_CBCR 0x%08x "
+ 	    "RCG CMD 0x%08x CFG 0x%08x\n", r[TULIP_SDC1_APPS_CBCR / 4],
+@@ -2241,6 +2248,65 @@ sdhci_enable_card_clock(void)
+ 	return 0;
+ }
+ 
++/*
++ * TULIP 0263: raise sdcc1_apps_clk_src through the SDC1 page.
++ *
++ * tulip_sdc1_clock_on() (boot-arg sdcclk=1) parks the root on XO at 400 kHz so
++ * the card can be identified, and nothing ever raised it again: the driver
++ * logged "25 MHz" while the bus actually ran at 400 kHz, about 0.4 MB/s over
++ * 8 bits, which is what made a full boot take hours. The other RCG path needs
++ * tulip_gcc_map() (boot-arg gccclk=1), which is a different page and is off by
++ * default, so it never ran either.
++ *
++ * This programs the rate on the same page that is already mapped and working.
++ * 25 MHz is the whyred-verified program for gcc-sdm660 (GPLL0 800 MHz,
++ * pre_div 31, m=1, n=2, dual edge); boot-arg sdcmhz=50 selects the table's
++ * dual-edge 50 MHz entry instead (GPLL0/16).
++ *
++ * Returns the rate actually programmed, 0 when the page is not mapped.
++ */
++static uint32_t
++tulip_sdc1_set_rate(const struct tulip_gcc_rate *r)
++{
++	volatile uint32_t *g = (volatile uint32_t *)tulip_sdc1_va;
++	uint32_t cfg = r->cfg;
++	const char *name = r->name;
++	uint32_t mhz = r->mhz;
++	uint32_t want = 0;
++	uint64_t deadline;
++
++	if (g == NULL) {
++		return 0;
++	}
++	/*
++	 * Only the 25 MHz step is upgradable: 50 MHz uses the table's own entry
++	 * (MODE=2, 800/(2*8) = 50 MHz), which stays inside the card's 52 MHz
++	 * High Speed budget. Single-edge MODE=0 would put 50 MHz on paper too,
++	 * but samples the bus once per period and a JESD84 HS card cannot do
++	 * that, so dual edge is the only program that really runs at 50 MHz.
++	 */
++	if (r == &tulip_gcc_rates[TULIP_GCC_RATE_25M] &&
++	    PE_parse_boot_argn("sdcmhz", &want, sizeof(want)) && want == 50) {
++		cfg = 0x210fu;
++		name = "50 MHz";
++		mhz = 50;
++	}
++	g[TULIP_SDC1_RCG_M / 4] = r->m;
++	g[TULIP_SDC1_RCG_N / 4] = r->n;
++	g[TULIP_SDC1_RCG_D / 4] = r->d;
++	g[TULIP_SDC1_RCG_CFG / 4] = cfg;
++	g[TULIP_SDC1_RCG_CMD / 4] = g[TULIP_SDC1_RCG_CMD / 4] | 0x3u;
++	nanoseconds_to_absolutetime(500ull * NSEC_PER_USEC, &deadline);
++	deadline += mach_absolute_time();
++	while ((g[TULIP_SDC1_RCG_CMD / 4] & 1u) &&
++	    mach_absolute_time() < deadline) {
++		delay(1);
++	}
++	printf("TULIP SDHCI: sdcc1_apps rate %s: RCG CMD 0x%08x CFG 0x%08x\n",
++	    name, g[TULIP_SDC1_RCG_CMD / 4], g[TULIP_SDC1_RCG_CFG / 4]);
++	return mhz;
++}
++
+ /*
+  * Program sdcc1_apps_clk_src. This mirrors clk_rcg2_set_rate() on the table
+  * entry in tulip_gcc_rates: stage M/N/D, write CFG, set CMD_UPDATE and wait
+@@ -2271,9 +2337,9 @@ sdhci_gcc_set_apps(const struct tulip_gcc_rate *r)
+ 	 */
+ 	if (se.gcc == 0) {
+ 		hc_wr16(SDHCI_CLOCK_CONTROL, 0);
+-		printf("TULIP SDHCI: GCC not mapped, keeping the bootloader "
+-		    "sdcc1_apps rate for %s\n", r->name);
+-		se.clk_mhz = 0;         /* unknown: the bootloader owns the rate */
++		se.clk_mhz = tulip_sdc1_set_rate(r);
++		printf("TULIP SDHCI: GCC not mapped, sdcc1_apps rate for %s "
++		    "set through the SDC1 page\n", r->name);
+ 		return sdhci_enable_card_clock();
+ 	}
+ 
