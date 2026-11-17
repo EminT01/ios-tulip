@@ -1,0 +1,39 @@
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -80,6 +80,7 @@
+ sweet_sample_thread(__unused void *arg, __unused wait_result_t wr)
+ {
+ 	static int chan;
++	int quiet = 0;
+ 	if (!PE_parse_boot_argn("sweetsample", sweet_sample_names, sizeof(sweet_sample_names))) {
+ 		strlcpy(sweet_sample_names, "SpringBoard,backboardd", sizeof(sweet_sample_names));
+ 	}
+@@ -87,6 +88,11 @@
+ 		return;
+ 	}
+ 	printf("TULIP SAMPLER: started for '%s'\n", sweet_sample_names);
++	/* TULIP 0253: boot-arg sweetquiet=1 keeps the console off the (slow, CPU-scrolled) panel; only a heartbeat and the samples are drawn */
++	PE_parse_boot_argn("sweetquiet", &quiet, sizeof(quiet));
++	if (quiet) {
++		sweet_console_muted = 1;
++	}
+ 	(void)tsleep(&chan, PZERO, "sweetsmp", 60 * hz);
+ 	/* TULIP 0251: runs for the whole boot; a perf line every 5 min; freezes the console only when a wanted process exists */
+ 	for (int i = 0, since_perf = 0; i < 100000; i++) {
+@@ -94,7 +100,7 @@
+ 		sweet_console_muted = 0;
+ 		sweet_sample_hits = 0;
+ 		proc_iterate(PROC_ALLPROCLIST, sweet_sample_count, NULL, NULL, NULL);
+-		if (sweet_sample_hits > 0 || since_perf >= 10) {
++		if (sweet_sample_hits > 0 || since_perf >= (quiet ? 4 : 10)) {
+ 			since_perf = 0;
+ 			absolutetime_to_nanoseconds(mach_absolute_time(), &now_ns);
+ 			absolutetime_to_nanoseconds(tulip_perf_con_ticks, &con_ns);
+@@ -112,6 +118,7 @@
+ 			(void)tsleep(&chan, PZERO, "sweetsmp", 100 * hz);
+ 			sweet_console_muted = 0;
+ 		}
++		sweet_console_muted = quiet;
+ 		since_perf++;
+ 		(void)tsleep(&chan, PZERO, "sweetsmp", 30 * hz);
+ 	}
