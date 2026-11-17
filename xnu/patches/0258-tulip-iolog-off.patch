@@ -1,0 +1,21 @@
+--- a/iokit/Kernel/IOUserClient.cpp
++++ b/iokit/Kernel/IOUserClient.cpp
+@@ -2612,0 +2613,2 @@
++/* TULIP 0258: line cap is a boot arg now; 0 keeps the old behaviour. */
++static uint32_t sweet_iolog_max = 1200;
+@@ -2620,0 +2623,9 @@
++		if (strcmp(sweet_iolog_names, "-") == 0 ||
++		    strcmp(sweet_iolog_names, "off") == 0 ||
++		    strcmp(sweet_iolog_names, "none") == 0) {
++			sweet_iolog_names[0] = 0;
++		}
++		uint32_t max = 0;
++		if (PE_parse_boot_argn("sweetiologmax", &max, sizeof(max)) && max) {
++			sweet_iolog_max = max;
++		}
+@@ -2623 +2634,4 @@
+-	if (sweet_iolog_lines >= 1200) {
++	if (sweet_iolog_names[0] == 0) {
++		return false;
++	}
++	if (sweet_iolog_lines >= sweet_iolog_max) {

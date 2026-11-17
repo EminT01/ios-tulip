@@ -1,0 +1,46 @@
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -80,0 +81,43 @@
++	/*
++	 * TULIP 0257: backboardd opens the service (IOServiceOpen returns 0x0) and
++	 * then keeps asking for the queue/batching keys that
++	 * IOHIDEventServiceUserClient expects. Without them it never builds the
++	 * event queue and retries every runloop slice, which is what the
++	 * "IOK backboardd: getbin SweetHID*.HIDEventServiceProperties -> none"
++	 * trace showed. Publish them, and the dictionary backboardd merges over
++	 * its own HID service properties.
++	 */
++	setProperty(kIOHIDEventServiceQueueSize, 256, 32);
++	setProperty(kIOHIDBatchIntervalKey, 0, 32);
++	setProperty(kIOHIDDisplayIntegratedKey, kOSBooleanTrue);
++
++	OSDictionary *svcProps = OSDictionary::withCapacity(6);
++	if (svcProps) {
++		OSNumber *svcNum;
++
++		svcNum = OSNumber::withNumber(getPrimaryUsagePage(), 32);
++		if (svcNum) {
++			svcProps->setObject(kIOHIDPrimaryUsagePageKey, svcNum);
++			svcNum->release();
++		}
++		svcNum = OSNumber::withNumber(getPrimaryUsage(), 32);
++		if (svcNum) {
++			svcProps->setObject(kIOHIDPrimaryUsageKey, svcNum);
++			svcNum->release();
++		}
++		svcNum = OSNumber::withNumber(getReportInterval(), 32);
++		if (svcNum) {
++			svcProps->setObject(kIOHIDReportIntervalKey, svcNum);
++			svcNum->release();
++		}
++		svcNum = OSNumber::withNumber(256, 32);
++		if (svcNum) {
++			svcProps->setObject(kIOHIDEventServiceQueueSize, svcNum);
++			svcNum->release();
++		}
++		svcProps->setObject(kIOHIDBuiltInKey, kOSBooleanTrue);
++		svcProps->setObject(kIOHIDDisplayIntegratedKey, kOSBooleanTrue);
++		setProperty("HIDEventServiceProperties", svcProps);
++		svcProps->release();
++	}
++
