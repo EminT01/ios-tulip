@@ -1,0 +1,61 @@
+--- a/bsd/vfs/vfs_syscalls.c
++++ b/bsd/vfs/vfs_syscalls.c
+@@ -3143,6 +3143,39 @@
+ 	return VFS_RETURNED;
+ }
+ 
++#if defined(ARM64_BOARD_CONFIG_VINCE)
++/*
++ * TULIP 0252: the HFS+ root has no journal and the phone is power-cycled
++ * between tests, so dirty metadata (allocation bitmap, volume header) that
++ * was never flushed leaves "BlockMarkFreeInternal() trying to free
++ * unallocated blocks" corruption behind. Flush every mount every 10 s.
++ */
++extern int hz;
++static void
++tulip_sync_thread(__unused void *arg, __unused wait_result_t wr)
++{
++	static int chan;
++	uint32_t waitfor = MNT_WAIT;
++
++	(void)tsleep(&chan, PZERO, "tulipsync", 30 * hz);
++	for (;;) {
++		vfs_iterate(LK_NOWAIT, sync_callback, &waitfor);
++		(void)tsleep(&chan, PZERO, "tulipsync", 10 * hz);
++	}
++}
++
++void tulip_sync_start(void);
++void
++tulip_sync_start(void)
++{
++	thread_t thd;
++
++	if (kernel_thread_start(tulip_sync_thread, NULL, &thd) == KERN_SUCCESS) {
++		thread_deallocate(thd);
++	}
++}
++#endif /* ARM64_BOARD_CONFIG_VINCE */
++
+ /* ARGSUSED */
+ int
+ sync(__unused proc_t p, __unused struct sync_args *uap, __unused int32_t *retval)
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -855,6 +855,7 @@
+ static int sdhci_reset_paths(void);
+ static int sdhci_enable_card_clock(void);
+ extern void sweet_sample_start(void);
++extern void tulip_sync_start(void);
+ static bool sdhci_ext_csd_sane(void);
+ static void sdhci_ext_csd_clear(void);
+ 
+@@ -4584,6 +4585,8 @@
+ 	tulip_fb_test();
+ 	/* TULIP 0249: backtraces of backboardd/SpringBoard (boot-arg sweetsample), first one after 90 s */
+ 	sweet_sample_start();
++	/* TULIP 0252: periodic sync of the journal-less root */
++	tulip_sync_start();
+ 	return 0;
+ }
+ 
