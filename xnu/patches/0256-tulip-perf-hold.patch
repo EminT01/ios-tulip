@@ -1,0 +1,29 @@
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -116,10 +116,12 @@
+ 	/* TULIP 0251: runs for the whole boot; a perf line every 5 min; freezes the console only when a wanted process exists */
+ 	for (int i = 0, since_perf = 0; i < 100000; i++) {
+ 		uint64_t now_ns = 0, con_ns = 0, emmc_ns = 0;
++		int perf_shown = 0;
+ 		sweet_console_muted = 0;
+ 		sweet_sample_hits = sweet_sample_scan(spids, snames);
+ 		if (sweet_sample_hits > 0 || since_perf >= (quiet ? 4 : 10)) {
+ 			since_perf = 0;
++			perf_shown = 1;
+ 			absolutetime_to_nanoseconds(mach_absolute_time(), &now_ns);
+ 			absolutetime_to_nanoseconds(tulip_perf_con_ticks, &con_ns);
+ 			absolutetime_to_nanoseconds(tulip_perf_emmc_ticks, &emmc_ns);
+@@ -130,6 +132,13 @@
+ 			    (unsigned long long)tulip_perf_emmc_reads,
+ 			    (unsigned long long)(tulip_perf_emmc_blocks >> 11));
+ 		}
++		if (perf_shown && sweet_sample_hits == 0) {
++			/* TULIP 0256: no wanted process yet; still hold the PERF line on screen for 30 s */
++			sweet_console_muted = 1;
++			(void)tsleep(&chan, PZERO, "sweetsmp", 30 * hz);
++			sweet_console_muted = 0;
++		}
++		perf_shown = 0;
+ 		if (sweet_sample_hits > 0) {
+ 			printf("SMP --- sample %d\n", i);
+ 			sweet_sample_run(sweet_sample_hits, spids, snames);
