@@ -1,0 +1,153 @@
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -26,6 +26,9 @@
+ 
+ extern int sweet_console_muted;
+ static int sweet_sample_hits;
++extern uint64_t tulip_perf_con_ticks, tulip_perf_con_bytes, tulip_perf_emmc_ticks, tulip_perf_emmc_reads, tulip_perf_emmc_blocks;
++extern uint64_t mach_absolute_time(void);
++extern void absolutetime_to_nanoseconds(uint64_t abstime, uint64_t *result);
+ static char sweet_sample_names[128];
+ 
+ static bool
+@@ -49,6 +52,17 @@
+ extern void sweet_sample_task(const char *name, int pid, task_t task);  /* osfmk/kern/exception.c */
+ 
+ static int
++sweet_sample_count(proc_t p, __unused void *arg)
++{
++	char name[32];
++	proc_name(proc_pid(p), name, sizeof(name));
++	if (sweet_sample_wanted(name) && proc_task(p) != TASK_NULL) {
++		sweet_sample_hits++;
++	}
++	return PROC_RETURNED;
++}
++
++static int
+ sweet_sample_proc(proc_t p, __unused void *arg)
+ {
+ 	char name[32];
+@@ -56,7 +70,6 @@
+ 	if (sweet_sample_wanted(name)) {
+ 		task_t task = proc_task(p);
+ 		if (task != TASK_NULL) {
+-			sweet_sample_hits++;
+ 			sweet_sample_task(name, proc_pid(p), task);
+ 		}
+ 	}
+@@ -73,21 +86,34 @@
+ 	if (sweet_sample_names[0] == '-') {
+ 		return;
+ 	}
+-	printf("TULIP SAMPLER: started for '%s', first sample in 60 s\n", sweet_sample_names);
++	printf("TULIP SAMPLER: started for '%s'\n", sweet_sample_names);
+ 	(void)tsleep(&chan, PZERO, "sweetsmp", 60 * hz);
+-	for (int i = 0; i < 40; i++) {
+-		/* TULIP 0250: draw this sample, then freeze the console for 100 s so it can be photographed */
++	/* TULIP 0251: runs for the whole boot; a perf line every 5 min; freezes the console only when a wanted process exists */
++	for (int i = 0, since_perf = 0; i < 100000; i++) {
++		uint64_t now_ns = 0, con_ns = 0, emmc_ns = 0;
+ 		sweet_console_muted = 0;
+-		printf("SMP --- sample %d\n", i);
+ 		sweet_sample_hits = 0;
+-		proc_iterate(PROC_ALLPROCLIST, sweet_sample_proc, NULL, NULL, NULL);
++		proc_iterate(PROC_ALLPROCLIST, sweet_sample_count, NULL, NULL, NULL);
++		if (sweet_sample_hits > 0 || since_perf >= 10) {
++			since_perf = 0;
++			absolutetime_to_nanoseconds(mach_absolute_time(), &now_ns);
++			absolutetime_to_nanoseconds(tulip_perf_con_ticks, &con_ns);
++			absolutetime_to_nanoseconds(tulip_perf_emmc_ticks, &emmc_ns);
++			printf("TULIP PERF: up %llu s, console %llu ms (%llu bytes), eMMC %llu ms (%llu reads, %llu MiB)\n",
++			    now_ns / 1000000000ULL, con_ns / 1000000ULL,
++			    (unsigned long long)tulip_perf_con_bytes, emmc_ns / 1000000ULL,
++			    (unsigned long long)tulip_perf_emmc_reads,
++			    (unsigned long long)(tulip_perf_emmc_blocks >> 11));
++		}
+ 		if (sweet_sample_hits > 0) {
+-			/* only freeze when a wanted process was actually sampled */
++			printf("SMP --- sample %d\n", i);
++			proc_iterate(PROC_ALLPROCLIST, sweet_sample_proc, NULL, NULL, NULL);
+ 			sweet_console_muted = 1;
+ 			(void)tsleep(&chan, PZERO, "sweetsmp", 100 * hz);
+ 			sweet_console_muted = 0;
+ 		}
+-		(void)tsleep(&chan, PZERO, "sweetsmp", 20 * hz);
++		since_perf++;
++		(void)tsleep(&chan, PZERO, "sweetsmp", 30 * hz);
+ 	}
+ }
+ 
+--- a/osfmk/console/serial_console.c
++++ b/osfmk/console/serial_console.c
+@@ -300,6 +300,12 @@
+ int sweet_console_muted;
+ #endif
+ 
++#if defined(VINCE_TULIP)
++/* TULIP 0251: console cost counters, printed by bsd/dev/sweet_sample.c */
++extern uint64_t mach_absolute_time(void);
++uint64_t tulip_perf_con_ticks, tulip_perf_con_bytes;
++#endif
++
+ static inline void
+ _cnputs(char *c, int size, bool poll)
+ {
+@@ -326,9 +332,18 @@
+ 
+ 	assert(c != NULL);
+ 
+-	while (size-- > 0) {
+-		_cnputc(*c, poll);
+-		c++;
++	{
++#if defined(VINCE_TULIP)
++		uint64_t tulip_t0 = mach_absolute_time();
++		tulip_perf_con_bytes += (uint64_t)size;
++#endif
++		while (size-- > 0) {
++			_cnputc(*c, poll);
++			c++;
++		}
++#if defined(VINCE_TULIP)
++		tulip_perf_con_ticks += mach_absolute_time() - tulip_t0;
++#endif
+ 	}
+ }
+ 
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -3761,11 +3761,15 @@
+ #define TULIP_IO_RETRIES        3
+ #define TULIP_IO_RETRY_DELAY_US 2000
+ 
++/* TULIP 0251: eMMC read cost counters, printed by bsd/dev/sweet_sample.c */
++uint64_t tulip_perf_emmc_ticks, tulip_perf_emmc_reads, tulip_perf_emmc_blocks;
++
+ static int
+ tulip_sdhci_read_blocks(uint64_t lba, uint32_t count, void *buf)
+ {
+ 	static bool retry_logged;
+ 	int error;
++	uint64_t perf_t0;
+ 
+ 	if (count == 0 || count > BOUNCE_SIZE / SDHCI_BLOCK || lba > UINT32_MAX) {
+ 		return EINVAL;
+@@ -3776,6 +3780,9 @@
+ 		    se.sec_count);
+ 		return EINVAL;
+ 	}
++	perf_t0 = mach_absolute_time();
++	tulip_perf_emmc_reads++;
++	tulip_perf_emmc_blocks += count;
+ 	for (int attempt = 1;; attempt++) {
+ 		error = sdhci_read_pio(count == 1 ? 17 : 18, (uint32_t)lba,
+ 		    count, buf);
+@@ -3793,6 +3800,7 @@
+ 		tulip_wait_card_tran();
+ 		delay(TULIP_IO_RETRY_DELAY_US);
+ 	}
++	tulip_perf_emmc_ticks += mach_absolute_time() - perf_t0;
+ 	return error;
+ }
+ 
