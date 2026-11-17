@@ -1,0 +1,11 @@
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -88,7 +88,7 @@
+ 	 * its own HID service properties.
+ 	 */
+ 	setProperty(kIOHIDEventServiceQueueSize, 256, 32);
+-	setProperty(kIOHIDBatchIntervalKey, 0, 32);
++	setProperty(kIOHIDBatchIntervalKey, (unsigned long long)0ULL, 32);
+ 	setProperty(kIOHIDDisplayIntegratedKey, kOSBooleanTrue);
+ 
+ 	OSDictionary *svcProps = OSDictionary::withCapacity(6);
