@@ -1,0 +1,100 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -1005,12 +1005,32 @@
+ 	    SDHCI_PSTATE_BUF_RD_READY : SDHCI_PSTATE_BUF_WR_READY;
+ 	uint64_t deadline;
+ 
++	uint32_t spins = 0;
++	uint64_t started = mach_absolute_time();
++
+ 	nanoseconds_to_absolutetime(DATA_TIMEOUT_NS, &deadline);
+ 	deadline += mach_absolute_time();
+ 	for (;;) {
+ 		uint32_t st = hc_rd(SDHCI_INT_STATUS);
+ 		uint32_t ps;
+ 
++		/*
++		 * TULIP 0270: this is the loop that can outlive the console.
++		 * Report the first spins, then roughly every 10 ms (delay(1)
++		 * is about 1 us here), so a photo shows whether it is spinning
++		 * on a clean status (nothing arriving) or on a latched error
++		 * nobody cleared. The cap keeps the console readable: a
++		 * 40-second DATA_TIMEOUT would otherwise print 40000 lines.
++		 */
++		if (spins < 4 || (spins % 10000) == 0) {
++			printf("TULIP SDHCI: wait_data: %s spin %u "
++			    "INT_STATUS 0x%08x PRESENT_STATE 0x%08x "
++			    "(%llu us)\n", what, spins, st,
++			    hc_rd(SDHCI_PRESENT_STATE),
++			    (unsigned long long)((mach_absolute_time() -
++			    started) / 1000));
++		}
++		spins++;
+ 		if (st & SDHCI_INT_ERR) {
+ 			sdhci_data_failure(what, st);
+ 			hc_wr(SDHCI_INT_STATUS, st);
+@@ -1037,6 +1057,10 @@
+ 			return 0;
+ 		}
+ 		if (mach_absolute_time() > deadline) {
++			printf("TULIP SDHCI: wait_data: %s TIMED OUT after "
++			    "%u spins, INT_STATUS 0x%08x "
++			    "PRESENT_STATE 0x%08x\n", what, spins, st,
++			    hc_rd(SDHCI_PRESENT_STATE));
+ 			sdhci_data_failure(what, st);
+ 			return ETIMEDOUT;
+ 		}
+@@ -1194,6 +1218,10 @@
+ {
+ 	uint64_t deadline;
+ 
++	printf("TULIP SDHCI: reset_paths: entry (SOFTWARE_RESET 0x%02x "
++	    "PRESENT_STATE 0x%08x INT_STATUS 0x%08x)\n",
++	    hc_rd8(SDHCI_SOFTWARE_RESET), hc_rd(SDHCI_PRESENT_STATE),
++	    hc_rd(SDHCI_INT_STATUS));
+ 	hc_wr8(SDHCI_SOFTWARE_RESET, SDHCI_RESET_CMD | SDHCI_RESET_DATA);
+ 	nanoseconds_to_absolutetime(CMD_TIMEOUT_NS, &deadline);
+ 	deadline += mach_absolute_time();
+@@ -1207,6 +1235,8 @@
+ 		}
+ 		delay(1);
+ 	}
++	printf("TULIP SDHCI: reset_paths: reset self-cleared "
++	    "(PRESENT_STATE 0x%08x)\n", hc_rd(SDHCI_PRESENT_STATE));
+ 	hc_wr(SDHCI_INT_STATUS, hc_rd(SDHCI_INT_STATUS));
+ 	/*
+ 	 * SOFTWARE_RESET is not enough on this core. The 0159 boot shows
+@@ -1329,6 +1359,18 @@
+ 	if (count == 0 || count > BOUNCE_SIZE / SDHCI_BLOCK) {
+ 		return EINVAL;
+ 	}
++	/*
++	 * TULIP 0270: the 0268 boot stopped between "verify: step 1: CMD8
++	 * read at 8-bit HS" and its "returned" line, so the read itself never
++	 * came back. Name each phase of it: the state the card is in when the
++	 * command is issued, what the controller reports after it, and which
++	 * wait is spinning.
++	 */
++	printf("TULIP SDHCI: rpio_once: entry %s (count %u, "
++	    "CLOCK_CONTROL 0x%04x HOST_CONTROL 0x%02x PRESENT_STATE 0x%08x "
++	    "INT_STATUS 0x%08x)\n", tag, count,
++	    hc_rd16(SDHCI_CLOCK_CONTROL), hc_rd8(SDHCI_HOST_CONTROL),
++	    hc_rd(SDHCI_PRESENT_STATE), hc_rd(SDHCI_INT_STATUS));
+ 
+ 	tulip_data_moved = false;
+ 	tulip_sdma_active = false;
+@@ -1347,9 +1389,14 @@
+ 	} else {
+ 		tr_mode = SDHCI_TRNS_READ | SDHCI_TRNS_BLK_CNT_EN;
+ 	}
++	printf("TULIP SDHCI: rpio_once: issuing cmd %u (tr_mode 0x%04x)\n",
++	    index, tr_mode);
+ 	error = sdhci_cmd(index, arg, tr_mode,
+ 	    SDHCI_CMD_RESP_SHORT | SDHCI_CMD_CRC | SDHCI_CMD_INDEX |
+ 	    SDHCI_CMD_DATA, &r1);
++	printf("TULIP SDHCI: rpio_once: cmd %u returned %d "
++	    "INT_STATUS 0x%08x PRESENT_STATE 0x%08x\n", index, error,
++	    hc_rd(SDHCI_INT_STATUS), hc_rd(SDHCI_PRESENT_STATE));
+ 	if (error) {
+ 		sdhci_recover(index == 18);
+ 		return error;
