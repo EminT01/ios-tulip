@@ -1,0 +1,49 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -1257,6 +1257,7 @@
+ 	uint64_t deadline;
+ 
+ 	uint32_t spins = 0;
++	bool slow_logged = false;
+ 	uint64_t started = mach_absolute_time();
+ 
+ 	nanoseconds_to_absolutetime(DATA_TIMEOUT_NS, &deadline);
+@@ -1266,20 +1267,24 @@
+ 		uint32_t ps;
+ 
+ 		/*
+-		 * TULIP 0270: this is the loop that can outlive the console.
+-		 * Report the first spins, then roughly every 10 ms (delay(1)
+-		 * is about 1 us here), so a photo shows whether it is spinning
+-		 * on a clean status (nothing arriving) or on a latched error
+-		 * nobody cleared. The cap keeps the console readable: a
+-		 * 40-second DATA_TIMEOUT would otherwise print 40000 lines.
+-		 */
+-		if (spins < 4 || (spins % 10000) == 0) {
+-			printf("TULIP SDHCI: wait_data: %s spin %u "
+-			    "INT_STATUS 0x%08x PRESENT_STATE 0x%08x "
+-			    "(%llu us)\n", what, spins, st,
+-			    hc_rd(SDHCI_PRESENT_STATE),
+-			    (unsigned long long)((mach_absolute_time() -
+-			    started) / 1000));
++	 * TULIP 0274: the per-spin print (0270) is gone.
++	 *
++	 * 0270 printed the first four spins and then every 10000. That read
++	 * as a diagnosis ("Buffer Read Ready never latches") but the status
++	 * it printed was INT_STATUS 0x00000020 - BRR itself - on every line:
++	 * each line was a block that HAD completed, printed on its first spin
++	 * because 0270 logged before it tested the bit. With a real root
++	 * mount doing CMD18 reads back to back, the console became a wall of
++	 * "spin 0" lines and buried everything else.
++	 *
++	 * Report only what is exceptional: the first spin of a wait that then
++	 * exceeds 1 ms, the timeout itself, and the PRESENT_STATE fallback.
++	 */
++		if ((spins & 0x3ffu) == 0x3ffu && !slow_logged) {
++			slow_logged = true;
++			printf("TULIP SDHCI: wait_data: %s is slow (>1 ms), "
++			    "spin %u INT_STATUS 0x%08x PRESENT_STATE 0x%08x\n",
++			    what, spins, st, hc_rd(SDHCI_PRESENT_STATE));
+ 		}
+ 		spins++;
+ 		if (st & SDHCI_INT_ERR) {
