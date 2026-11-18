@@ -66,3 +66,4 @@
  	if (error) {
  		sdhci_recover(index == 18);
  		return error;
+
