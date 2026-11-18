@@ -1,0 +1,70 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -241,15 +241,32 @@
+ 	    b[21], b[22], b[23]);
+ }
+ 
++static int tt_spin;	/* touchprobe=2: poll without tsleep (busy wait) */
++
+ static void
+-tulip_touch_thread(void *arg, wait_result_t w)
++tt_nap(int ticks)
+ {
+ 	static int chan;
++
++	if (tt_spin) {
++		uint64_t ms = (uint64_t)ticks * 1000 / (uint64_t)hz;
++
++		while (ms--) {
++			tulip_udelay(1000);
++		}
++		return;
++	}
++	(void)tsleep(&chan, PZERO, "tulipts", ticks);
++}
++
++static void
++tulip_touch_thread(void *arg, wait_result_t w)
++{
+ 	uint8_t b[24], last2 = 0xff, id[2];
+ 	int muted, a, rc, found = 0, i, since = 0;
+ 
+ 	(void)arg; (void)w;
+-	(void)tsleep(&chan, PZERO, "tulipts", 30 * hz);
++	tt_nap(30 * hz);
+ 	muted = sweet_console_muted;
+ 	sweet_console_muted = 0;
+ 	tt_a = (volatile uint32_t *)ml_io_map(0x03002000, 0x2000);
+@@ -292,7 +309,7 @@
+ 	sweet_console_muted = muted;
+ 
+ 	for (i = 0; i < 100000 && found; i++) {
+-		(void)tsleep(&chan, PZERO, "tulipts", hz / 10 ? hz / 10 : 1);
++		tt_nap(hz / 10 ? hz / 10 : 1);
+ 		memset(b, 0, sizeof(b));
+ 		rc = tt_read(0x38, 0x00, b, 24);
+ 		since++;
+@@ -302,6 +319,11 @@
+ 			muted = sweet_console_muted;
+ 			sweet_console_muted = 0;
+ 			tt_dump("data", b, rc);
++			if ((b[2] & 0xf) != 0) {
++				printf("TULIP TOUCH: n=%u event=%u x=%u y=%u id=%u\n", b[2] & 0xf,
++				    b[3] >> 6, ((b[3] & 0xfu) << 8) | b[4],
++				    ((b[5] & 0xfu) << 8) | b[6], b[5] >> 4);
++			}
+ 			sweet_console_muted = muted;
+ 		}
+ 	}
+@@ -313,9 +335,10 @@
+ 	thread_t th;
+ 	uint32_t on = 0;
+ 
+-	if (!PE_parse_boot_argn("touchprobe", &on, sizeof(on)) || on != 1) {
++	if (!PE_parse_boot_argn("touchprobe", &on, sizeof(on)) || (on != 1 && on != 2)) {
+ 		return;
+ 	}
++	tt_spin = (on == 2);
+ 	if (kernel_thread_start(tulip_touch_thread, NULL, &th) == KERN_SUCCESS) {
+ 		thread_deallocate(th);
+ 	}
