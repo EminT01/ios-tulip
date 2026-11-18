@@ -1,0 +1,127 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -476,6 +476,18 @@
+  * what this specific card declares instead of from what the driver assumes.
+  */
+ #define EXT_CSD_CARD_TYPE       196u
++/*
++ * TULIP 0266: EXT_CSD[196] CARD_TYPE, JESD84-B51 §6.2.5, one bit per
++ * mode. bit0 HS(26 MHz), bit1 DDR52, bit2 HS200@1.8V, bit3 HS200@1.2V,
++ * bit4 HS400@1.8V, bit5 HS400@1.2V, bit6 HS400 Enhanced Strobe.
++ */
++#define EXT_CSD_TYPE_HS        0x01u
++#define EXT_CSD_TYPE_DDR52     0x02u
++#define EXT_CSD_TYPE_HS200_18  0x04u
++#define EXT_CSD_TYPE_HS200_12  0x08u
++#define EXT_CSD_TYPE_HS400_18  0x10u
++#define EXT_CSD_TYPE_HS400_12  0x20u
++#define EXT_CSD_TYPE_HS400_ES  0x40u
+ 
+ /* --------------------------------------------------------------- transfers */
+ #define SDHCI_BLOCK             512u
+@@ -3655,13 +3667,41 @@
+ 		const uint8_t *ext = (const void *)(se.dma + DMA_BOUNCE);
+ 		uint8_t ct = ext[EXT_CSD_CARD_TYPE];
+ 
+-		printf("TULIP SDHCI: enumeration: CARD_TYPE 0x%02x (%s%s%s%s%s), "
+-		    "REV %u, driver supports HS only\n", ct,
+-		    (ct & 0x02u) ? "HS " : "",
+-		    (ct & 0x04u) ? "DDR52 " : "",
+-		    (ct & 0x10u) ? "HS200-1.8V " : "",
+-		    (ct & 0x20u) ? "HS200-1.2V " : "",
+-		    (ct & 0x40u) ? "HS400 " : "", ext[192]);
++		/*
++		 * JESD84-B51 EXT_CSD[196] CARD_TYPE bit map, one bit per mode.
++		 * The first version of this log shifted every name one bit to
++		 * the right (0x02 printed "HS" for what is DDR52, 0x10 printed
++		 * "HS200" for HS400), so a card that really declared DDR52 was
++		 * read as "HS only". Name the bits in place and say what the
++		 * driver can actually select from them.
++		 */
++		printf("TULIP SDHCI: enumeration: CARD_TYPE 0x%02x "
++		    "(HS=%u DDR52=%u HS200-1.8V=%u HS200-1.2V=%u "
++		    "HS400-1.8V=%u HS400-1.2V=%u HS400-ES=%u), "
++		    "REV %u\n", ct,
++		    (ct & EXT_CSD_TYPE_HS) ? 1u : 0u,
++		    (ct & EXT_CSD_TYPE_DDR52) ? 1u : 0u,
++		    (ct & EXT_CSD_TYPE_HS200_18) ? 1u : 0u,
++		    (ct & EXT_CSD_TYPE_HS200_12) ? 1u : 0u,
++		    (ct & EXT_CSD_TYPE_HS400_18) ? 1u : 0u,
++		    (ct & EXT_CSD_TYPE_HS400_12) ? 1u : 0u,
++		    (ct & EXT_CSD_TYPE_HS400_ES) ? 1u : 0u, ext[192]);
++		{
++			bool has_ddr = (ct & EXT_CSD_TYPE_DDR52) != 0;
++			bool has_hs200 = (ct & (EXT_CSD_TYPE_HS200_18 |
++			    EXT_CSD_TYPE_HS200_12)) != 0;
++			bool has_hs400 = (ct & (EXT_CSD_TYPE_HS400_18 |
++			    EXT_CSD_TYPE_HS400_12)) != 0;
++
++			printf("TULIP SDHCI: enumeration: card declares %s%s%s; "
++			    "driver selects HS only%s\n",
++			    has_ddr ? "DDR52 " : "",
++			    has_hs200 ? "HS200 " : "",
++			    has_hs400 ? "HS400" : "",
++			    has_ddr ? " (DDR52 is the next step: same 52 MHz,"
++			    " no tuning, no DLL)" :
++			    "");
++		}
+ 	}
+ 	printf("TULIP SDHCI: enumeration: switch GCC to 25 MHz\n");
+ 	error = sdhci_gcc_set_apps(&tulip_gcc_rates[TULIP_GCC_RATE_25M]);
+@@ -3732,7 +3772,26 @@
+ 	 * failing. This is the only place the 50 MHz entry is selected, so the
+ 	 * probe paths and LBA0 stay on the known-good 25 MHz setup.
+ 	 */
++	/*
++	 * TULIP 0266: 50 MHz is only legal now, after HS_TIMING=1 came back
++	 * clean and the card is in TRAN. The previous boot raised the rate
++	 * from tulip_sdc1_set_rate() inside the 25 MHz step, before the card
++	 * had accepted High Speed timing at all, which put the bus above the
++	 * JESD84 Default Speed budget during the switch. Ask the card again
++	 * and prove the timing really is 1 before clocking higher.
++	 */
++	{
++		uint32_t hs_now = 0;
++
++		if (sdhci_send_status(se.rca, &hs_now) == 0) {
++			printf("TULIP SDHCI: enumeration: pre-50 MHz CMD13 R1 "
++			    "0x%08x (state %u)\n", hs_now,
++			    (hs_now & SDHCI_R1_STATE_MASK) >> 9);
++		}
++	}
+ 	sdhci_clock_output();
++	printf("TULIP SDHCI: enumeration: HS_TIMING=1 accepted, raising "
++	    "sdcc1_apps to 50 MHz\n");
+ 	error = sdhci_gcc_set_apps(&tulip_gcc_rates[TULIP_GCC_RATE_50M]);
+ 	if (error) {
+ 		printf("TULIP SDHCI: enumeration: 50 MHz switch failed (%d), "
+@@ -4807,16 +4866,29 @@
+ 
+ 	lck_mtx_lock(&tulip_sdhci_lock);
+ 	stage = "take-over";
++	printf("TULIP SDHCI: init: ### entering take_over\n");
+ 	error = sdhci_take_over();
++	printf("TULIP SDHCI: init: ### take_over returned %d (enumerated %d)\n",
++	    error, se.enumerated ? 1 : 0);
+ 	if (!error) {
+ 		stage = "EXT_CSD 8-bit verify";
++		printf("TULIP SDHCI: init: ### before verify_highspeed_bus "
++		    "(sec %u)\n", se.sec_count);
+ 		error = sdhci_verify_highspeed_bus(se.sec_count);
++		printf("TULIP SDHCI: init: ### verify_highspeed_bus returned %d\n",
++		    error);
+ 	}
+ 	if (!error) {
+ 		stage = "GPT partition";
++		printf("TULIP SDHCI: init: ### before find_partition \"%s\"\n",
++		    se.part);
+ 		error = tulip_sdhci_find_partition(se.part);
++		printf("TULIP SDHCI: init: ### find_partition returned %d "
++		    "(first 0x%llx, %u blocks)\n", error,
++		    (unsigned long long)se.first_block, se.nblocks);
+ 	}
+ 	lck_mtx_unlock(&tulip_sdhci_lock);
++	printf("TULIP SDHCI: init: ### I/O lock released\n");
+ 	if (error) {
+ 		/*
+ 		 * The per-step printf() burst above scrolls off the 90x27
