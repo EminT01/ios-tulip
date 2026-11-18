@@ -1,0 +1,67 @@
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -93,6 +93,10 @@
+ 	}
+ }
+ 
++/* TULIP 0274: progress markers read by the eMMC heartbeat (TULIP HB) */
++volatile int sweet_sample_stage;
++volatile uint64_t sweet_sample_wakes;
++
+ static void
+ sweet_sample_thread(__unused void *arg, __unused wait_result_t wr)
+ {
+@@ -112,13 +116,18 @@
+ 	if (quiet) {
+ 		sweet_console_muted = 1;
+ 	}
++	sweet_sample_stage = 1;
+ 	(void)tsleep(&chan, PZERO, "sweetsmp", 60 * hz);
++	sweet_sample_stage = 2;
++	sweet_sample_wakes++;
+ 	/* TULIP 0251: runs for the whole boot; a perf line every 5 min; freezes the console only when a wanted process exists */
+ 	for (int i = 0, since_perf = 0; i < 100000; i++) {
+ 		uint64_t now_ns = 0, con_ns = 0, emmc_ns = 0;
+ 		int perf_shown = 0;
+ 		sweet_console_muted = 0;
++		sweet_sample_stage = 3;
+ 		sweet_sample_hits = sweet_sample_scan(spids, snames);
++		sweet_sample_stage = 4;
+ 		if (sweet_sample_hits > 0 || since_perf >= (quiet ? 4 : 10)) {
+ 			since_perf = 0;
+ 			perf_shown = 1;
+@@ -148,7 +157,9 @@
+ 		}
+ 		sweet_console_muted = quiet;
+ 		since_perf++;
++		sweet_sample_stage = 6;
+ 		(void)tsleep(&chan, PZERO, "sweetsmp", 30 * hz);
++		sweet_sample_wakes++;
+ 	}
+ }
+ 
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -4536,6 +4536,22 @@
+ 		delay(TULIP_IO_RETRY_DELAY_US);
+ 	}
+ 	tulip_perf_emmc_ticks += mach_absolute_time() - perf_t0;
++	{
++		/* TULIP 0274: heartbeat every 20 s from the disk path (needs no timer sleep) */
++		static uint64_t hb_next_ns;
++		extern volatile int sweet_sample_stage;
++		extern volatile uint64_t sweet_sample_wakes;
++		uint64_t hb_ns = 0;
++
++		absolutetime_to_nanoseconds(mach_absolute_time(), &hb_ns);
++		if (hb_ns >= hb_next_ns) {
++			hb_next_ns = hb_ns + 20000000000ULL;
++			printf("TULIP HB: up %llu s, sampler stage %d wakes %llu, eMMC reads %llu\n",
++			    hb_ns / 1000000000ULL, sweet_sample_stage,
++			    (unsigned long long)sweet_sample_wakes,
++			    (unsigned long long)tulip_perf_emmc_reads);
++		}
++	}
+ 	return error;
+ }
+ 
