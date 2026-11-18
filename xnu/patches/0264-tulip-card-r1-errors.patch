@@ -1,0 +1,69 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -762,6 +762,55 @@
+ }
+ 
+ /*
++ * TULIP 0264: a command can complete cleanly and still have carried an
++ * error. SDHCI_INT_ERR only covers the *controller's* error bits; the card
++ * reports its own failures in bits 31:19 and 12:9 of the R1 status word.
++ * 400 kHz identification clock the R1 of CMD13/CMD6 is trusted, and a card
++ * error that is never parsed looks exactly like a successful switch: the
++ * EXT_CSD write is acknowledged, the host widens to 8 bits, and the first
++ * block read then returns data framed for a card that never switched. That
++ * is the shape the U5Root corruption has.
++ *
++ * RESPONSE[39:8] already holds R1[31:0] for a short response, so the raw
++ * register value is parsed directly.
++ */
++static void
++sdhci_resp_check(uint8_t index, uint32_t resp)
++{
++	static const struct {
++		uint32_t bit;
++		const char *name;
++	} errs[] = {
++		{ 1u << 19, "address-out-of-range" },
++		{ 1u << 20, "address-misalign" },
++		{ 1u << 21, "block-len-error" },
++		{ 1u << 22, "erase-seq-error" },
++		{ 1u << 23, "erase-param" },
++		{ 1u << 24, "wp-violation" },
++		{ 1u << 25, "card-is-locked" },
++		{ 1u << 26, "lock-unlock-failed" },
++		{ 1u << 27, "com-crc-error" },
++		{ 1u << 28, "illegal-command" },
++		{ 1u << 29, "card-ecc-failed" },
++		{ 1u << 30, "cc-error" },
++		{ 1u << 31, "error" },
++	};
++	unsigned int i;
++
++	if ((resp & 0xf8000000u) == 0 && (resp & 0x0000f000u) == 0) {
++		return;
++	}
++	for (i = 0; i < sizeof(errs) / sizeof(errs[0]); i++) {
++		if (resp & errs[i].bit) {
++			break;
++		}
++	}
++	printf("TULIP SDHCI: command %u: card R1 error 0x%08x (%s)\n",
++	    index, resp, i < sizeof(errs) / sizeof(errs[0]) ? errs[i].name :
++	    "unknown");
++}
++
++/*
+  * Issue one command and wait for Command Complete.
+  *
+  * The status register is cleared before the command is written: the
+@@ -834,6 +883,10 @@
+ 			hc_wr(SDHCI_INT_STATUS, SDHCI_INT_CC);
+ 			if (resp) {
+ 				*resp = hc_rd(SDHCI_RESPONSE);
++				/* TULIP 0264: the card's own R1 errors */
++				if (resp != NULL && (flags & SDHCI_CMD_RESP_SHORT)) {
++					sdhci_resp_check(index, *resp);
++				}
+ 			}
+ 			return 0;
+ 		}

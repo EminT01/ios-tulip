@@ -1,7 +1,5 @@
 --- a/bsd/dev/tulip_sdhci.c
 +++ b/bsd/dev/tulip_sdhci.c
---- a/bsd/dev/tulip_sdhci.c
-+++ b/bsd/dev/tulip_sdhci.c
 @@ -658,6 +658,12 @@ tulip_gcc_map(void)
  #define TULIP_SDC1_RCG_N       0x038u
  #define TULIP_SDC1_RCG_D       0x03cu
