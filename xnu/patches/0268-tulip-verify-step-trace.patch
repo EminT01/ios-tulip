@@ -1,0 +1,68 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -4078,9 +4078,25 @@
+ 	uint8_t hs_timing = 0;
+ 	int error;
+ 
++	/*
++	 * TULIP 0268: the 0267 boot stopped inside this function and printed
++	 * nothing, so the last console line was "### before
++	 * verify_highspeed_bus". Print every step, including the host state
++	 * going in, so the next photo names the exact read that died.
++	 */
++	printf("TULIP SDHCI: verify: entry (CLOCK_CONTROL 0x%04x "
++	    "HOST_CONTROL 0x%02x HOST_CONTROL2 0x%04x PRESENT_STATE 0x%08x "
++	    "INT_STATUS 0x%08x)\n",
++	    hc_rd16(SDHCI_CLOCK_CONTROL), hc_rd8(SDHCI_HOST_CONTROL),
++	    hc_rd16(SDHCI_HOST_CONTROL2), hc_rd(SDHCI_PRESENT_STATE),
++	    hc_rd(SDHCI_INT_STATUS));
++	printf("TULIP SDHCI: verify: step 1: CMD8 read at 8-bit HS\n");
+ 	/* Re-read EXT_CSD (CMD8) at 25 MHz 8-bit High-Speed to exercise DAT[7:0] */
+ 	dma_sync(SDHCI_BLOCK, TRUE);
+ 	error = sdhci_read_pio(8, 0, 1, (void *)(se.dma + DMA_BOUNCE));
++	printf("TULIP SDHCI: verify: step 1 returned %d (INT_STATUS 0x%08x "
++	    "PRESENT_STATE 0x%08x)\n", error, hc_rd(SDHCI_INT_STATUS),
++	    hc_rd(SDHCI_PRESENT_STATE));
+ 	if (error == 0) {
+ 		dma_sync(SDHCI_BLOCK, TRUE);
+ 		memcpy(&verify_sec_count, (const void *)(se.dma + DMA_BOUNCE + 212), 4);
+@@ -4099,11 +4115,13 @@
+ 	}
+ 
+ 	/* Fallback 1: Disable Host High-Speed edge mode & revert card HS_TIMING=0 */
+-	printf("TULIP SDHCI: rolling back HS_TIMING to legacy edge at 25 MHz\n");
++	printf("TULIP SDHCI: verify: fallback 1: HS_TIMING=0 legacy edge\n");
+ 	(void)sdhci_switch_ext_csd(EXT_CSD_HS_TIMING, 0, 0, SDHCI_CTRL_HISPD, "HS_TIMING=0");
+ 
+ 	dma_sync(SDHCI_BLOCK, TRUE);
++	printf("TULIP SDHCI: verify: fallback 1: CMD8 read at 8-bit legacy\n");
+ 	error = sdhci_read_pio(8, 0, 1, (void *)(se.dma + DMA_BOUNCE));
++	printf("TULIP SDHCI: verify: fallback 1 returned %d\n", error);
+ 	if (error == 0) {
+ 		dma_sync(SDHCI_BLOCK, TRUE);
+ 		memcpy(&verify_sec_count, (const void *)(se.dma + DMA_BOUNCE + 212), 4);
+@@ -4115,12 +4133,14 @@
+ 	}
+ 
+ 	/* Fallback 2: Drop from 8-bit to 4-bit bus width */
+-	printf("TULIP SDHCI: rolling back bus width to 4-bit\n");
++	printf("TULIP SDHCI: verify: fallback 2: BUS_WIDTH=4\n");
+ 	(void)sdhci_switch_ext_csd(EXT_CSD_BUS_WIDTH, EXT_CSD_BUS_WIDTH_4,
+ 	    SDHCI_CTRL_4BITBUS, SDHCI_CTRL_BUS_MASK, "BUS_WIDTH=4");
+ 
+ 	dma_sync(SDHCI_BLOCK, TRUE);
++	printf("TULIP SDHCI: verify: fallback 2: CMD8 read at 4-bit\n");
+ 	error = sdhci_read_pio(8, 0, 1, (void *)(se.dma + DMA_BOUNCE));
++	printf("TULIP SDHCI: verify: fallback 2 returned %d\n", error);
+ 	if (error == 0) {
+ 		dma_sync(SDHCI_BLOCK, TRUE);
+ 		memcpy(&verify_sec_count, (const void *)(se.dma + DMA_BOUNCE + 212), 4);
+@@ -4132,7 +4152,7 @@
+ 	}
+ 
+ 	/* Fallback 3: one DAT line, legacy edge. */
+-	printf("TULIP SDHCI: rolling back bus width to 1-bit\n");
++	printf("TULIP SDHCI: verify: fallback 3: BUS_WIDTH=1\n");
+ 	(void)sdhci_switch_ext_csd(EXT_CSD_BUS_WIDTH, EXT_CSD_BUS_WIDTH_1, 0,
+ 	    SDHCI_CTRL_BUS_MASK, "BUS_WIDTH=1");
+ 
