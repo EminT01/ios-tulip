@@ -8,9 +8,17 @@
  #include <sys/kernel.h>
  #include <os/atomic_private.h>
  
-@@ -92,6 +93,238 @@
+@@ -92,6 +93,7 @@
  }
  #define delay(us) tulip_udelay(us)
+ 
++
+ static void tulip_log_start(void);
+ static void tulip_fb_test(void);
+ 
+@@ -99,6 +101,238 @@
+ /* osfmk/arm/machine_routines.h, not exported to the BSD layer */
+ extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
  
 +/*
 + * TULIP 0271: FocalTech FTS touch probe (boot-arg touchprobe=1, otherwise inert).
@@ -244,10 +252,10 @@
 +	}
 +}
 +
- static void tulip_log_start(void);
- static void tulip_fb_test(void);
- 
-@@ -5148,6 +5381,8 @@
+ /* ------------------------------------------------- SDHCI standard registers */
+ #define SDHCI_SDMA_ADDR         0x00
+ #define SDHCI_BLOCK_SIZE        0x04
+@@ -5148,6 +5382,8 @@
  	sweet_sample_start();
  	/* TULIP 0252: periodic sync of the journal-less root */
  	tulip_sync_start();
