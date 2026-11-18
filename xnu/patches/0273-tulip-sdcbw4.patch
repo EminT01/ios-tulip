@@ -1,0 +1,74 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -102,6 +102,23 @@
+ extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+ 
+ /*
++ * TULIP 0273: sdcbw=4 starts the width ladder at four data lines.
++ *
++ * 0268/0270/0269/0272 narrowed the failure to the DATA phase: the command
++ * path is clean (CMD8 R1 0x00000900, card in TRAN, HOST_CONTROL 0x24), the
++ * data phase starts (DAT_LINE_ACTIVE in PRESENT_STATE 0x01be02f6) and then
++ * nothing arrives - INT_STATUS stays 0x00000000, Buffer Read Ready never
++ * latches. The same boot at 400 kHz (sdcslow=1) dies identically, so the
++ * clock is not the variable, and 1-bit PIO reads still work (LBA0 55 aa),
++ * which leaves the width switch itself.
++ *
++ * With four data lines the same read either works - the driver's 8-bit host
++ * setup is wrong - or fails identically - the width switch procedure is
++ * broken at every width above 1.
++ */
++static uint32_t tulip_sdcbw;    /* 0 = auto (8-bit first), 4 = force 4-bit */
++
++/*
+  * TULIP 0271: FocalTech FTS touch probe (boot-arg touchprobe=1, otherwise inert).
+  * Hardware from the live DTB: i2c@c175000 / focaltech@38, SDA GPIO 2, SCL
+  * GPIO 3, reset GPIO 66, irq GPIO 67 (falling edge), TLMM at 0x03000000
+@@ -4049,6 +4066,22 @@
+ 	    hc_rd16(SDHCI_HOST_CONTROL2));
+ 	sdhci_clock_output();
+ 
++	/*
++	 * TULIP 0273: sdcbw=4 skips the 8-bit rung. The ladder below still
++	 * falls back to 4-bit and then 1-bit, so naming 4 here only changes
++	 * which rung is tried first.
++	 */
++	if (tulip_sdcbw == 4) {
++		printf("TULIP SDHCI: enumeration: sdcbw=4, starting at the "
++		    "4-bit rung (8-bit not attempted)\n");
++		error = sdhci_switch_ext_csd(EXT_CSD_BUS_WIDTH,
++		    EXT_CSD_BUS_WIDTH_4, SDHCI_CTRL_4BITBUS,
++		    SDHCI_CTRL_BUS_MASK, "BUS_WIDTH=4 (sdcbw=4)");
++		if (!error) {
++			bus_width = 4;
++		}
++		goto width_done;
++	}
+ 	error = sdhci_switch_ext_csd(EXT_CSD_BUS_WIDTH,
+ 	    EXT_CSD_BUS_WIDTH_8, SDHCI_CTRL_8BITBUS, SDHCI_CTRL_BUS_MASK,
+ 	    "BUS_WIDTH=8");
+@@ -4083,6 +4116,7 @@
+ 			bus_width = 1;
+ 		}
+ 	}
++width_done:
+ 	if (error) {
+ 		return error;
+ 	}
+@@ -5254,6 +5288,16 @@
+ 		se.part[i] = "userdata"[i];
+ 	}
+ 	PE_parse_boot_argn("emmcroot", se.part, sizeof(se.part));
++	PE_parse_boot_argn("sdcbw", &tulip_sdcbw, sizeof(tulip_sdcbw));
++	if (tulip_sdcbw != 0 && tulip_sdcbw != 4) {
++		printf("TULIP SDHCI: sdcbw=%u is not supported (4 only); "
++		    "using the default ladder\n", tulip_sdcbw);
++		tulip_sdcbw = 0;
++	}
++	if (tulip_sdcbw == 4) {
++		printf("TULIP SDHCI: sdcbw=4, the width ladder starts at "
++		    "4-bit\n");
++	}
+ 	{
+ 		uint32_t slow = 0;
+ 
