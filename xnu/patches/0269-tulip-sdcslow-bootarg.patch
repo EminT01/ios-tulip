@@ -1,0 +1,71 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -695,6 +695,19 @@
+ static vm_offset_t tulip_sdc1_va;
+ /* TULIP 0267: sdchz=0 turns the post-verify 50 MHz step off. */
+ static uint32_t hz_enable = 1;
++/*
++ * TULIP 0269: sdcslow=1 pins the card to the 400 kHz identification clock.
++ *
++ * The 0268 boot proved the 8-bit data path is what dies: the last lines were
++ * "verify: entry (... INT_STATUS 0x00000000)" and "verify: step 1: CMD8 read
++ * at 8-bit HS", and the read never returned. Two variables are in play at that
++ * moment - 8 data lines and a 25 MHz clock - and nothing has separated them.
++ * With sdcslow=1 the same enumeration and the same 8-bit switch run at the
++ * identification rate, so one boot says which of the two it is:
++ *   400 kHz survives   -> the data path is fine, the clock is the problem
++ *   400 kHz dies too   -> the 8-bit switch itself never worked
++ */
++static bool tulip_sdcslow;
+ 
+ static void
+ tulip_sdc1_clock_on(void)
+@@ -2363,6 +2376,19 @@
+ 		return 0;
+ 	}
+ 	/*
++	 * TULIP 0269: sdcslow=1 keeps the identification clock. Substituting
++	 * the 400 kHz table entry - instead of returning early - means the
++	 * RCG is really programmed at 400 kHz (LK may have left it higher)
++	 * and the caller's se.clk_mhz records 0, which the enumeration log
++	 * then prints truthfully.
++	 */
++	if (tulip_sdcslow && r == &tulip_gcc_rates[TULIP_GCC_RATE_25M]) {
++		r = &tulip_gcc_rates[TULIP_GCC_RATE_400K];
++		cfg = r->cfg;
++		name = r->name;
++		mhz = r->mhz;
++	}
++	/*
+ 	 * TULIP 0267: the sdcmhz=50 shortcut is gone.
+ 	 *
+ 	 * It turned the 25 MHz step into 50 MHz invisibly, so the bus ran at
+@@ -3814,6 +3840,11 @@
+ 	uint32_t r1 = 0;
+ 	int error;
+ 
++	if (tulip_sdcslow) {
++		printf("TULIP SDHCI: 50 MHz step skipped (sdcslow=1), the card "
++		    "stays at the identification clock\n");
++		return 0;
++	}
+ 	if (PE_parse_boot_argn("sdchz", &hz_enable, sizeof(hz_enable)) &&
+ 	    hz_enable == 0) {
+ 		printf("TULIP SDHCI: 50 MHz step skipped (sdchz=0), "
+@@ -4915,6 +4946,16 @@
+ 		se.part[i] = "userdata"[i];
+ 	}
+ 	PE_parse_boot_argn("emmcroot", se.part, sizeof(se.part));
++	{
++		uint32_t slow = 0;
++
++		tulip_sdcslow = PE_parse_boot_argn("sdcslow", &slow,
++		    sizeof(slow)) && slow != 0;
++		if (tulip_sdcslow) {
++			printf("TULIP SDHCI: sdcslow=1, the card clock stays "
++			    "at 400 kHz through enumeration\n");
++		}
++	}
+ 	if (PE_parse_boot_argn("emmcrw", &rw, sizeof(rw))) {
+ 		se.writable = (rw != 0);
+ 	}
