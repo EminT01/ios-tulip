@@ -1,0 +1,36 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -1794,6 +1794,33 @@
+ 		return sdhci_read_pio_once(index, arg, count, buf);
+ 	}
+ 
++	/*
++	 * TULIP 0272: SDMA first (0261) reboots the phone at the first 8-bit read:
++	 * the log ends at "verify: step 1: CMD8 read at 8-bit HS", before the
++	 * PIO trace line, with the card at 400 kHz as well. SDMA has been flaky on
++	 * this board since 0159, so PIO is the default and SDMA is opt-in with
++	 * boot-arg sdcsdma=1.
++	 */
++	{
++		static int sdma_opt = -1;
++
++		if (sdma_opt < 0) {
++			uint32_t on = 0;
++
++			sdma_opt = (PE_parse_boot_argn("sdcsdma", &on, sizeof(on)) &&
++			    on == 1) ? 1 : 0;
++			printf("TULIP SDHCI: block reads use %s\n",
++			    sdma_opt ? "SDMA (sdcsdma=1)" : "PIO");
++		}
++		if (!sdma_opt) {
++			error = sdhci_read_pio_once(index, arg, count, buf);
++			if (!error) {
++				dma_sync(count * SDHCI_BLOCK, TRUE);
++			}
++			return error;
++		}
++	}
++
+ 	pa = se.dma_pa + DMA_BOUNCE;
+ 	dma_sync(count * SDHCI_BLOCK, FALSE);
+ 	error = sdhci_read_sdma(index, arg, count, pa);
