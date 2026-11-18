@@ -1,0 +1,68 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -101,6 +101,10 @@
+ /* osfmk/arm/machine_routines.h, not exported to the BSD layer */
+ extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+ 
++/* TULIP 0275: log the first block read of the boot in full, then quiet. */
++static bool rpio_logged;
++static bool rpio_full_log;
++
+ /*
+  * TULIP 0273: sdcbw=4 starts the width ladder at four data lines.
+  *
+@@ -1622,11 +1626,25 @@
+ 	 * command is issued, what the controller reports after it, and which
+ 	 * wait is spinning.
+ 	 */
+-	printf("TULIP SDHCI: rpio_once: entry %s (count %u, "
+-	    "CLOCK_CONTROL 0x%04x HOST_CONTROL 0x%02x PRESENT_STATE 0x%08x "
+-	    "INT_STATUS 0x%08x)\n", tag, count,
+-	    hc_rd16(SDHCI_CLOCK_CONTROL), hc_rd8(SDHCI_HOST_CONTROL),
+-	    hc_rd(SDHCI_PRESENT_STATE), hc_rd(SDHCI_INT_STATUS));
++	/*
++	 * TULIP 0275: the three rpio_once lines below used to print for every
++	 * block. Once the root is mounted that is the entire console, and the
++	 * launchd/mount lines that actually matter scroll away. Print the
++	 * first read of the boot in full, then only what goes wrong.
++	 */
++	if (!rpio_logged) {
++		rpio_logged = true;
++		rpio_full_log = true;
++	} else {
++		rpio_full_log = false;
++	}
++	if (rpio_full_log) {
++		printf("TULIP SDHCI: rpio_once: entry %s (count %u, "
++		    "CLOCK_CONTROL 0x%04x HOST_CONTROL 0x%02x "
++		    "PRESENT_STATE 0x%08x INT_STATUS 0x%08x)\n", tag, count,
++		    hc_rd16(SDHCI_CLOCK_CONTROL), hc_rd8(SDHCI_HOST_CONTROL),
++		    hc_rd(SDHCI_PRESENT_STATE), hc_rd(SDHCI_INT_STATUS));
++	}
+ 
+ 	tulip_data_moved = false;
+ 	tulip_sdma_active = false;
+@@ -1645,14 +1663,18 @@
+ 	} else {
+ 		tr_mode = SDHCI_TRNS_READ | SDHCI_TRNS_BLK_CNT_EN;
+ 	}
+-	printf("TULIP SDHCI: rpio_once: issuing cmd %u (tr_mode 0x%04x)\n",
+-	    index, tr_mode);
++	if (rpio_full_log) {
++		printf("TULIP SDHCI: rpio_once: issuing cmd %u "
++		    "(tr_mode 0x%04x)\n", index, tr_mode);
++	}
+ 	error = sdhci_cmd(index, arg, tr_mode,
+ 	    SDHCI_CMD_RESP_SHORT | SDHCI_CMD_CRC | SDHCI_CMD_INDEX |
+ 	    SDHCI_CMD_DATA, &r1);
+-	printf("TULIP SDHCI: rpio_once: cmd %u returned %d "
+-	    "INT_STATUS 0x%08x PRESENT_STATE 0x%08x\n", index, error,
+-	    hc_rd(SDHCI_INT_STATUS), hc_rd(SDHCI_PRESENT_STATE));
++	if (rpio_full_log || error) {
++		printf("TULIP SDHCI: rpio_once: cmd %u returned %d "
++		    "INT_STATUS 0x%08x PRESENT_STATE 0x%08x\n", index, error,
++		    hc_rd(SDHCI_INT_STATUS), hc_rd(SDHCI_PRESENT_STATE));
++	}
+ 	if (error) {
+ 		sdhci_recover(index == 18);
+ 		return error;
