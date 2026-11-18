@@ -1,0 +1,77 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -421,6 +421,18 @@
+  * closest exact rate and stays inside the JESD84 HS timing budget. Only the
+  * HS entry is selected automatically: it needs CMD6 HS_TIMING=1 plus the
+  * 8-bit width the enumeration already applies, and no signal tuning.
++ *
++ * DO NOT SELECT TULIP_GCC_RATE_100M (or anything above it). A faster RCG
++ * only moves the clock: the card still has to be told, with CMD6
++ * HS_TIMING=2/3, and then the receive path needs the 1.8 V tuned sampling
++ * window. Neither exists here: no CMD21 tuning, no locked Qualcomm DLL,
++ * and the host still runs the fixed feedback clock from
++ * sdhci_set_legacy_host(). Clocking a card into a timing mode it was not
++ * switched to, while the HFS+ root is mounted read-write, is how the
++ * root image gets corrupted. HS200 is deliberately out of scope; DDR52
++ * (HS_TIMING=0x04, same 52 MHz clock, double pumped, no tuning) is the
++ * only faster mode that is safe without the DLL work, and it is not
++ * implemented yet either.
+  */
+ static const struct tulip_gcc_rate tulip_gcc_rates[] = {
+ 	{ "400 kHz", 0x01u, 0xfcu, 0xfbu, 0x2017u, 0u },
+@@ -458,6 +470,12 @@
+ #define EXT_CSD_BUS_WIDTH_8     2u
+ #define EXT_CSD_HS_TIMING       185u
+ #define EXT_CSD_TIMING_HS       1u
++/*
++ * TULIP 0265: read-only capability byte (CARD_TYPE, DEVICE_TYPE on newer
++ * eMMC). It is only ever read, so a faster timing mode can be judged from
++ * what this specific card declares instead of from what the driver assumes.
++ */
++#define EXT_CSD_CARD_TYPE       196u
+ 
+ /* --------------------------------------------------------------- transfers */
+ #define SDHCI_BLOCK             512u
+@@ -765,11 +783,11 @@
+  * TULIP 0264: a command can complete cleanly and still have carried an
+  * error. SDHCI_INT_ERR only covers the *controller's* error bits; the card
+  * reports its own failures in bits 31:19 and 12:9 of the R1 status word.
+- * 400 kHz identification clock the R1 of CMD13/CMD6 is trusted, and a card
+- * error that is never parsed looks exactly like a successful switch: the
+- * EXT_CSD write is acknowledged, the host widens to 8 bits, and the first
+- * block read then returns data framed for a card that never switched. That
+- * is the shape the U5Root corruption has.
++ * Against a 400 kHz identification clock the R1s of CMD13/CMD6 go
++ * unexamined, and a card error that is never parsed looks exactly like a
++ * successful switch: the EXT_CSD write is acknowledged, the host widens
++ * to 8 bits, and the next block read is framed for a card that never
++ * switched. That is the shape the U5Root corruption has.
+  *
+  * RESPONSE[39:8] already holds R1[31:0] for a short response, so the raw
+  * register value is parsed directly.
+@@ -3626,6 +3644,25 @@
+ 	    "(%llu MiB)\n", sec_count,
+ 	    (unsigned long long)((uint64_t)sec_count * SDHCI_BLOCK >> 20));
+ 
++	/*
++	 * TULIP 0265: name the card's own declared capabilities. Byte 196 is
++	 * CARD_TYPE on this generation: bit1 HS, bit2 DDR52, bit4 HS200@1.8V,
++	 * bit5 HS200@1.2V, bit6 HS400. The driver only ever selects HS, and the
++	 * log now says why the faster modes are not on the table for THIS card
++	 * instead of leaving the reader to guess.
++	 */
++	{
++		const uint8_t *ext = (const void *)(se.dma + DMA_BOUNCE);
++		uint8_t ct = ext[EXT_CSD_CARD_TYPE];
++
++		printf("TULIP SDHCI: enumeration: CARD_TYPE 0x%02x (%s%s%s%s%s), "
++		    "REV %u, driver supports HS only\n", ct,
++		    (ct & 0x02u) ? "HS " : "",
++		    (ct & 0x04u) ? "DDR52 " : "",
++		    (ct & 0x10u) ? "HS200-1.8V " : "",
++		    (ct & 0x20u) ? "HS200-1.2V " : "",
++		    (ct & 0x40u) ? "HS400 " : "", ext[192]);
++	}
+ 	printf("TULIP SDHCI: enumeration: switch GCC to 25 MHz\n");
+ 	error = sdhci_gcc_set_apps(&tulip_gcc_rates[TULIP_GCC_RATE_25M]);
+ 	if (error) {
