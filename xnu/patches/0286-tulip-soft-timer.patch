@@ -1,10 +1,9 @@
 --- a/osfmk/arm64/sleh.c
 +++ b/osfmk/arm64/sleh.c
-@@ -1849,6 +1849,50 @@
- 
- /* TULIP 0279: interrupt counters shown by the TULIP HB2 line */
+@@ -1851,6 +1851,49 @@
  volatile uint64_t tulip_irq_timer, tulip_irq_ipi, tulip_irq_other, tulip_irq_spur;
-+
+ /* TULIP 0284: PPI 30 (CNTP) tick counter, kept apart from the vtimer's. */
+ volatile uint64_t tulip_irq_cntp;
 +#if defined(VINCE_TULIP)
 +/*
 + * TULIP 0286: soft tick source, because no timer interrupt is delivered.
