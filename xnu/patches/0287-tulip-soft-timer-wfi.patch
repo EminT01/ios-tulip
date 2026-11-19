@@ -34,7 +34,15 @@
  
 --- a/osfmk/arm64/cpu.c
 +++ b/osfmk/arm64/cpu.c
-@@ -576,11 +576,36 @@
+@@ -41,6 +41,7 @@
+ #include <kern/percpu.h>
+ #include <kern/thread.h>
+ #include <kern/timer_queue.h>
++#include <kern/ast.h>
+ #include <arm/cpu_data.h>
+ #include <arm/cpuid.h>
+ #include <arm/caches_internal.h>
+@@ -576,11 +577,42 @@
  	 * handler calls, so the rest of XNU sees an ordinary tick.
  	 */
  	{
@@ -59,7 +67,13 @@
 +			if (__improbable(cpu_data_ptr->cpu_signal & SIGPdisabled)) {
 +				break;
 +			}
-+			if (__improbable(AST_PENDING(cpu_data_ptr, current_thread()))) {
++			/*
++			 * TULIP 0287 fix: AST_PENDING is not a macro in this tree.
++			 * kern/ast.h declares ast_t *ast_pending(void) (arm's
++			 * cpu_common.c returns &cpu_datap()->cpu_pending_ast), so
++			 * test the returned bitmap directly.
++			 */
++			if (__improbable(*ast_pending() != 0)) {
 +				break;
 +			}
 +			wfi_deadline = tulip_soft_tick_arm();
