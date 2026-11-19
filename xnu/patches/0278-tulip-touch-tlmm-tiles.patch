@@ -1,0 +1,30 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -106,7 +106,15 @@
+ extern void thread_deallocate(thread_t);
+ static volatile uint32_t *tt_a, *tt_b;
+ static int tt_lines;
+-#define TT_HALF 5
++/*
++ * TULIP 0276: the vendor pinctrl splits the TLMM into tiles. GPIO 2/3 are in
++ * the SOUTH tile (0x03000000 + 0x100000 + 0x1000 * n = 0x03102000) and GPIO
++ * 66/67 in the NORTH tile (+0x900000 -> 0x03942000). 0260 mapped 0x03002000 /
++ * 0x03042000, which is outside any tile and hangs the AXI bus (whyred notes:
++ * "stalls the AXI bus"). The external pull-ups sit on pm660_l11, which XNU
++ * does not power, so only the weak internal pull-up is left: slow half bit.
++ */
++#define TT_HALF 50
+ 
+ static volatile uint32_t *
+ tt_cfg(int pin)
+@@ -269,8 +277,8 @@
+ 	tt_nap(30 * hz);
+ 	muted = sweet_console_muted;
+ 	sweet_console_muted = 0;
+-	tt_a = (volatile uint32_t *)ml_io_map(0x03002000, 0x2000);
+-	tt_b = (volatile uint32_t *)ml_io_map(0x03042000, 0x2000);
++	tt_a = (volatile uint32_t *)ml_io_map(0x03102000, 0x2000);
++	tt_b = (volatile uint32_t *)ml_io_map(0x03942000, 0x2000);
+ 	printf("TULIP TOUCH: probe start, TLMM %p %p\n", (void *)tt_a, (void *)tt_b);
+ 
+ 	/* reset: irq pulled up as input, reset low 5 ms then high, 300 ms to boot */
