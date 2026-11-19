@@ -73,7 +73,7 @@
 +	{
 +		extern int tulip_soft_tick_due(void);
 +		while (tulip_soft_tick_due()) {
-+			extern void rtclock_intr(boolean_t);
++			/* Signature comes from <arm/rtclock.h>: void rtclock_intr(unsigned int). */
 +			rtclock_intr(TRUE);
 +		}
 +	}
