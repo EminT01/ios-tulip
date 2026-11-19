@@ -1,61 +1,14 @@
 --- a/osfmk/arm64/sleh.c
 +++ b/osfmk/arm64/sleh.c
-@@ -1849,6 +1849,79 @@
- 
- /* TULIP 0279: interrupt counters shown by the TULIP HB2 line */
- volatile uint64_t tulip_irq_timer, tulip_irq_ipi, tulip_irq_other, tulip_irq_spur;
-+
-+#if defined(VINCE_TULIP)
-+/*
-+ * TULIP 0286/0287: soft tick source, because no timer interrupt is delivered.
-+ *
-+ * 0282/0283/0284 measured the same thing three times: CNTV is armed and
-+ * expired (CTL 0x5, CVAL in the past), GICR_ISPENDR0 reports PPI 30 pending,
-+ * and GICR_ISENABLER0 still reads back 0x0 after every write - TrustZone keeps
-+ * the PPIs, so nothing reaches EL1.
-+ *
-+ * 0286 polled this from cpu_idle() before the WFI, but cpu_idle runs the poll
-+ * once and then sleeps in WFI forever, so the counter stayed at zero for the
-+ * whole boot. 0287 polls from inside a bounded WFI window instead: arm the
-+ * virtual timer a period out, WFI, wake, deliver what is due, repeat.
-+ *
-+ * 100 Hz matches the VINCE config; CNTFRQ is read rather than assumed.
-+ */
-+volatile uint64_t tulip_soft_ticks;
-+volatile uint64_t tulip_soft_tick_next;
-+
-+int
-+tulip_soft_tick_due(void)
-+{
-+	uint64_t now, freq, next;
-+
-+	__asm__ volatile ("mrs %0, cntvct_el0" : "=r"(now));
-+	__asm__ volatile ("mrs %0, cntfrq_el0" : "=r"(freq));
-+	if (freq == 0) {
-+		return 0;
-+	}
-+	if (tulip_soft_tick_next == 0) {
-+		tulip_soft_tick_next = now + freq / 100;
-+		return 0;
-+	}
-+	if (now < tulip_soft_tick_next) {
-+		return 0;
-+	}
-+	next = tulip_soft_tick_next + freq / 100;
-+	/* Do not fall behind by more than one tick after a long stall. */
-+	if (next < now) {
-+		next = now + freq / 100;
-+	}
-+	tulip_soft_tick_next = next;
-+	tulip_soft_ticks++;
-+	return 1;
-+}
+@@ -1893,6 +1893,31 @@
+ 	tulip_soft_ticks++;
+ 	return 1;
+ }
 +
 +/*
-+ * TULIP 0287: arm CNTV one period ahead and return the raw comparable value,
-+ * so cpu_idle can bound its WFI. Even though the interrupt never arrives, the
-+ * counter still expires and cpu_idle re-checks after every WFI wakeup; the
-+ * bounded window is what stops it from sleeping through the whole boot.
++ * TULIP 0287: arm CNTV one period ahead and return that absolute value, so
++ * cpu_idle can bound its WFI window. The interrupt never arrives on this SoC,
++ * so the window - not the interrupt - is what wakes the core back up.
 + */
 +uint64_t
 +tulip_soft_tick_arm(void)
@@ -76,42 +29,37 @@
 +	}
 +	return deadline;
 +}
-+#endif /* VINCE_TULIP */
+ #endif /* VINCE_TULIP */
  volatile uint32_t tulip_irq_lastother;
  
- void
 --- a/osfmk/arm64/cpu.c
 +++ b/osfmk/arm64/cpu.c
-@@ -588,6 +588,51 @@
- 	mt_cpu_idle(cpu_data_ptr);
- #endif /* MONOTONIC */
- 
-+#if defined(VINCE_TULIP)
-+	/*
-+	 * TULIP 0287: no timer interrupt ever arrives on this SoC.
-+	 *
-+	 * 0286 polled the counter once here and then fell into WFI, which sleeps
-+	 * until an interrupt - and none comes. The tick counter stayed at 0 for a
-+	 * whole 423 s boot while threads waited on tsleep().
-+	 *
-+	 * Bound the wait instead: arm CNTV one period out, WFI, and when the WFI
-+	 * returns for any reason re-check the counter and deliver the tick. The
-+	 * window mirrors what the hardware timer would do; it only lacks the
-+	 * interrupt that would normally cut the sleep short.
-+	 */
-+	{
-+		extern int tulip_soft_tick_due(void);
+@@ -576,11 +576,36 @@
+ 	 * handler calls, so the rest of XNU sees an ordinary tick.
+ 	 */
+ 	{
++		/*
++		 * TULIP 0287: 0286 polled once here and then fell into WFI, which
++		 * sleeps until an interrupt - and this SoC never delivers the timer
++		 * one, so a 423 s boot printed "soft ticks 0".  Bound the wait
++		 * instead: arm CNTV a period out, WFI, re-check on every wake.
++		 */
+ 		extern int tulip_soft_tick_due(void);
+-		while (tulip_soft_tick_due()) {
+-			/* Signature comes from <arm/rtclock.h>: void rtclock_intr(unsigned int). */
+-			rtclock_intr(TRUE);
 +		extern uint64_t tulip_soft_tick_arm(void);
-+		extern void rtclock_intr(boolean_t);
 +		uint64_t wfi_deadline;
-+		uint64_t cnt_now, cnt_freq;
 +
 +		for (;;) {
 +			while (tulip_soft_tick_due()) {
++				/* <arm/rtclock.h>: void rtclock_intr(unsigned int). */
 +				rtclock_intr(TRUE);
 +			}
-+			if (__improbable(cpu_data_ptr->cpu_signal & SIGPdisabled) ||
-+			    __improbable(AST_PENDING(cpu_data_ptr, current_thread()))) {
++			if (__improbable(cpu_data_ptr->cpu_signal & SIGPdisabled)) {
++				break;
++			}
++			if (__improbable(AST_PENDING(cpu_data_ptr, current_thread()))) {
 +				break;
 +			}
 +			wfi_deadline = tulip_soft_tick_arm();
@@ -121,41 +69,8 @@
 +			__builtin_arm_dsb(DSB_SY);
 +			__builtin_arm_wfi();
 +			__builtin_arm_isb(ISB_SY);
-+			/* Wake even if nothing interrupted us: the window expired. */
-+			__asm__ volatile ("mrs %0, cntvct_el0" : "=r"(cnt_now));
-+			__asm__ volatile ("mrs %0, cntfrq_el0" : "=r"(cnt_freq));
-+			if (cnt_freq != 0 && cnt_now < wfi_deadline) {
-+				/* Spurious wakeup before the window: still fine, loop. */
-+			}
-+		}
-+		Idle_load_context();
-+	}
-+#else /* !VINCE_TULIP */
- 	if (wfi) {
- #if !defined(APPLE_ARM64_ARCH_FAMILY)
- 		platform_cache_idle_enter();
-@@ -641,6 +686,7 @@
  		}
- #endif /* DEVELOPMENT || DEBUG */
++		Idle_load_context();
  	}
-+#endif /* VINCE_TULIP */
+ #endif /* VINCE_TULIP */
  
- 	ClearIdlePop(TRUE);
- 
---- a/bsd/dev/tulip_sdhci.c
-+++ b/bsd/dev/tulip_sdhci.c
-@@ -4386,6 +4386,14 @@
- 				    (unsigned long long)tulip_irq_timer, (unsigned long long)tulip_irq_ipi,
- 				    (unsigned long long)tulip_irq_other, tulip_irq_lastother,
- 				    (unsigned long long)tulip_irq_spur);
-+#if defined(VINCE_TULIP)
-+				{
-+					extern volatile uint64_t tulip_soft_ticks;
-+
-+					printf("TULIP SOFT: soft ticks %llu\n",
-+					    (unsigned long long)tulip_soft_ticks);
-+				}
-+#endif
- 			}
- 			{
- 				/* TULIP 0282: raw timer / GIC state, to see where the tick is lost */

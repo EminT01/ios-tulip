@@ -1,25 +1,20 @@
 --- a/bsd/dev/tulip_sdhci.c
 +++ b/bsd/dev/tulip_sdhci.c
-@@ -4386,6 +4386,54 @@
- 				    (unsigned long long)tulip_irq_timer, (unsigned long long)tulip_irq_ipi,
- 				    (unsigned long long)tulip_irq_other, tulip_irq_lastother,
- 				    (unsigned long long)tulip_irq_spur);
+@@ -4394,6 +4394,47 @@
+ 					    (unsigned long long)tulip_soft_ticks);
+ 				}
+ #endif
 +#if defined(VINCE_TULIP)
 +				{
 +					/*
-+					 * TULIP 0288: pe_init_fiq() runs long before BSD
-+					 * starts, and something between that point and here
-+					 * leaves the timer PPI unusable: 0283/0284 read back
++					 * TULIP 0288: the shim's own diag on this board
++					 * (same core, same GIC) prints IRQS 9 / LASTID 19,
++					 * so the timer does reach EL1 before XNU runs.
++					 * pe_init_fiq() is the only GIC setup in the kernel
++					 * and runs very early; 0283/0284 then read back
 +					 * GICR_ISENABLER0 0x0 and GICR_ISPENDR0 never shows
-+					 * bit 19, yet the shim's own diag (same GIC, same core)
-+					 * got IRQS 9 with LASTID 19.
-+					 *
-+					 * Re-arm the PPI here, where the console is alive and
-+					 * the result can be printed, and read the registers back
-+					 * straight after: isEN bit 19 proves the write landed,
-+					 * ISPENDR bit 19 proves the interrupt is in the GIC. If
-+					 * both are set and sleh_irq still counts zero, the
-+					 * problem is downstream of the distributor.
++					 * bit 19. Re-arm the PPI here, where printf works,
++					 * and print what the redistributor kept.
 +					 */
 +					extern vm_offset_t vince_gicr_base;
 +					uintptr_t rd = (uintptr_t)vince_gicr_base;
@@ -32,7 +27,6 @@
 +						    (volatile uint32_t *)(rd + 0x10200);
 +						uint32_t w0 = *waker;
 +						uint32_t i0 = *isen;
-+						uint32_t p0 = *pend;
 +
 +						if (w0 & 0x4) {
 +							*waker = w0 & ~0x2u;
@@ -41,14 +35,13 @@
 +								;
 +							}
 +						}
-+						/* vtimer PPI 19 and the IPI SGI 1 */
 +						*isen = (1u << 19) | (1u << 1);
 +						__builtin_arm_isb(0xf);
 +						printf("TULIP GIC288: waker 0x%08x->0x%08x "
 +						    "isen 0x%08x->0x%08x pend 0x%08x\n",
 +						    w0, *waker, i0, *isen, *pend);
 +					} else {
-+						printf("TULIP GIC288: gicr base is NULL\n");
++						printf("TULIP GIC288: gicr base NULL\n");
 +					}
 +				}
 +#endif
