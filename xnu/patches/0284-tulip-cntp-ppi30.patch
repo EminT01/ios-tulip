@@ -43,8 +43,17 @@
  	gicr_write32(GICR_IGROUPR0, 0x81FFFFFF);
 --- a/osfmk/arm64/sleh.c
 +++ b/osfmk/arm64/sleh.c
-@@ -1903,10 +1903,27 @@
- 	if (intid >= 1020 && intid <= 1023) {
+@@ -1849,6 +1849,8 @@
+ 
+ /* TULIP 0279: interrupt counters shown by the TULIP HB2 line */
+ volatile uint64_t tulip_irq_timer, tulip_irq_ipi, tulip_irq_other, tulip_irq_spur;
++/* TULIP 0284: PPI 30 (CNTP) tick counter, kept apart from the vtimer's. */
++volatile uint64_t tulip_irq_cntp;
+ volatile uint32_t tulip_irq_lastother;
+ 
+ void
+@@ -1908,11 +1910,31 @@
+ 		tulip_irq_spur++;
  		return; /* spurious */
  	}
 -	if (intid == sweet_vtimer_intid) {
@@ -57,6 +66,10 @@
 +		 * CNTVCT share the architected counter, so the tick treatment is
 +		 * identical; CNTP is re-armed here before the EOI.
 +		 */
+ 		tulip_irq_timer++;
++		if (intid == 30) {
++			tulip_irq_cntp++;
++		}
  		sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_TIMER);
  		cdp->cpu_decrementer = -1; /* Large */
  		INTERRUPT_MASKED_DEBUG_START(rtclock_intr, DBG_INTR_TYPE_TIMER);
