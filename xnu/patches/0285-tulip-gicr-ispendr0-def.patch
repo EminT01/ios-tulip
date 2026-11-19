@@ -1,0 +1,10 @@
+--- a/pexpert/pexpert/arm64/VINCE.h
++++ b/pexpert/pexpert/arm64/VINCE.h
+@@ -49,6 +49,7 @@
+ #define GICR_WAKER                              0x14
+ #define GICR_IGROUPR0                           0x10080
+ #define GICR_ISENABLER0                         0x10100
++#define GICR_ISPENDR0                           0x10200
+ #define GICR_IPRIORITYR0                        0x10400
+ #define GICR_TYPER_AFFINITY_VALUE_SHIFT         32
+ #define GICR_TYPER_LAST                         0x10
