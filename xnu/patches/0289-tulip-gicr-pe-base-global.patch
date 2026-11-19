@@ -1,0 +1,73 @@
+--- a/pexpert/arm/pe_fiq.c
++++ b/pexpert/arm/pe_fiq.c
+@@ -34,6 +34,15 @@
+ /* TULIP 0283 */
+ volatile uint32_t tulip_gic_dbg[8];
+ vm_offset_t tulip_gicr_pe_base;
++/*
++ * TULIP 0289: the gicr_read32/write32/read64 macros expand to
++ * "gicr_pe_base + offset". That name has to be a file-scope variable this
++ * CPU has resolved, because pe_init_fiq() programs its own redistributor
++ * frame through those macros. It used to be a local in both the scan and
++ * pe_init_fiq(); the macros worked, but any code path that used a macro
++ * before the local was set silently addressed GICR_BASE + 0 (PE 0's frame).
++ */
++vm_offset_t gicr_pe_base = 0;
+ uint32_t vince_vtimer_intid = SWEET_VTIMER_INTID;
+ #endif
+ 
+@@ -62,15 +71,23 @@
+ #define gicr_read64(offset) (_gic_read64(gicr_pe_base + (offset)))
+ 
+ static vm_offset_t
+-find_gicr_pe_base()
++find_gicr_pe_base(void)
+ {
+-	// We only care about aff1 and aff0
+-	uint32_t phys_id = __builtin_arm_rsr64("MPIDR_EL1") & (MPIDR_AFF1_MASK | MPIDR_AFF0_MASK);
++	/*
++	 * TULIP 0289: scan through the file-scope gicr_pe_base, which is the
++	 * symbol the gicr_read64() macro reads, so the frame under examination
++	 * and the frame the macro reads are always the same. Compare the whole
++	 * affinity value (Aff3:Aff2:Aff1:Aff0) against GICR_TYPER[63:32].
++	 */
++	uint64_t mpidr = __builtin_arm_rsr64("MPIDR_EL1");
++	uint32_t phys_id = (uint32_t)(((mpidr >> 32) & 0xff) << 24) |
++	    (uint32_t)(mpidr & 0xffffff);
+ 
+ 	for (vm_offset_t offset = 0; offset < gicr_size; offset += GICR_PE_SIZE) {
+-		vm_offset_t gicr_pe_base = gicr_base + offset;
++		gicr_pe_base = gicr_base + offset;
+ 		uint64_t gicr_typer = gicr_read64(GICR_TYPER);
+-		uint32_t aff_value = (uint32_t) (gicr_typer >> GICR_TYPER_AFFINITY_VALUE_SHIFT) & (MPIDR_AFF1_MASK | MPIDR_AFF0_MASK);
++		uint32_t aff_value = (uint32_t)(gicr_typer >>
++		    GICR_TYPER_AFFINITY_VALUE_SHIFT);
+ 
+ 		if (phys_id == aff_value) {
+ 			return gicr_pe_base;
+@@ -81,7 +98,9 @@
+ 		}
+ 	}
+ 
+-	panic("%s: cannot find GICR base for core %u", __func__, ml_get_cpu_number(phys_id));
++	gicr_pe_base = 0;
++	panic("%s: cannot find GICR base for core %u (mpidr %#llx)", __func__,
++	    ml_get_cpu_number(phys_id), (unsigned long long)mpidr);
+ }
+ 
+ void
+@@ -162,8 +181,12 @@
+ #endif
+ 	}
+ 
+-	// Find the redistributor for this processor
+-	vm_offset_t gicr_pe_base = find_gicr_pe_base();
++	/*
++	 * Find the redistributor for this processor. TULIP 0289: this used to
++	 * declare a local gicr_pe_base, shadowing the file-scope symbol the
++	 * gicr_* macros read. Call it for the value it leaves in that symbol.
++	 */
++	(void)find_gicr_pe_base();
+ 
+ 	// Mark this PE to be awake
+ 	uint32_t gicr_waker = gicr_read32(GICR_WAKER);
