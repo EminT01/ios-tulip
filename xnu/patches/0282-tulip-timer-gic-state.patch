@@ -1,0 +1,32 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -4745,6 +4745,29 @@
+ 				    (unsigned long long)tulip_irq_other, tulip_irq_lastother,
+ 				    (unsigned long long)tulip_irq_spur);
+ 			}
++			{
++				/* TULIP 0282: raw timer / GIC state, to see where the tick is lost */
++				extern vm_offset_t vince_gicr_base;
++				uint64_t ctl, cval, cnt, hppir, grpen, pmr, daif, srcnt;
++				uint32_t pend = 0, enab = 0, grp = 0;
++
++				__asm__ volatile ("mrs %0, cntv_ctl_el0" : "=r"(ctl));
++				__asm__ volatile ("mrs %0, cntv_cval_el0" : "=r"(cval));
++				__asm__ volatile ("mrs %0, cntvct_el0" : "=r"(cnt));
++				__asm__ volatile ("mrs %0, S3_0_C12_C12_2" : "=r"(hppir)); /* ICC_HPPIR1_EL1 */
++				grpen = __builtin_arm_rsr64("ICC_IGRPEN1_EL1");
++				pmr = __builtin_arm_rsr64("ICC_PMR_EL1");
++				__asm__ volatile ("mrs %0, daif" : "=r"(daif));
++				srcnt = __builtin_arm_rsr64("ICC_SRE_EL1");
++				if (vince_gicr_base != 0) {
++					grp = *(volatile uint32_t *)(vince_gicr_base + 0x10080);
++					enab = *(volatile uint32_t *)(vince_gicr_base + 0x10100);
++					pend = *(volatile uint32_t *)(vince_gicr_base + 0x10200);
++				}
++				printf("TULIP HB3: cntv ctl 0x%llx cval-cnt %lld  gicr grp 0x%x enab 0x%x pend 0x%x  "
++				    "hppir 0x%llx grpen1 %llu pmr 0x%llx daif 0x%llx sre %llu\n",
++				    ctl, (long long)(cval - cnt), grp, enab, pend, hppir, grpen, pmr, daif, srcnt);
++			}
+ 		}
+ 		tulip_touch_poll();
+ 	}
