@@ -1,0 +1,156 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -341,13 +341,144 @@
+ 	}
+ }
+ 
++/*
++ * TULIP 0280: the panel answers at 0x62, not 0x38: it is the Novatek NVT-ts
++ * node of the live DTB (compatible "novatek,NVT-ts", reset GPIO 66, irq GPIO
++ * 67, same QUP1 bus). NT36xxx registers are a 24-bit address: write
++ * { 0xFF, addr >> 16, addr >> 8 } to select the page, then read at addr & 0xff.
++ * The event buffer address depends on the IC, so the poll tries the known
++ * candidates and prints the pages whose bytes change (touch the screen).
++ * Mode touchprobe=3. There is no timer-driven thread here (timed sleeps do not
++ * wake yet): the setup runs once in a thread, the poll is called from the eMMC
++ * read path, which runs constantly during boot.
++ */
++static int tt_ready;
++static int tt_nvt_lines;
++
++static int
++tt_write(uint8_t addr, const uint8_t *d, int n)
++{
++	int i, ok = 1;
++
++	tt_start();
++	ok = tt_wbyte((uint8_t)(addr << 1));
++	for (i = 0; ok && i < n; i++) {
++		ok = tt_wbyte(d[i]);
++	}
++	tt_stop();
++	return ok ? 0 : -1;
++}
++
++static int
++tt_nvt_read(uint32_t addr, uint8_t *buf, int n)
++{
++	uint8_t pg[3];
++
++	pg[0] = 0xff;
++	pg[1] = (uint8_t)(addr >> 16);
++	pg[2] = (uint8_t)(addr >> 8);
++	if (tt_write(0x62, pg, 3) != 0) {
++		return -3;
++	}
++	return tt_read(0x62, (uint8_t)(addr & 0xff), buf, n);
++}
++
++static const uint32_t tt_nvt_pages[] = {
++	0x11e00, 0x21c00, 0x11a00, 0x22d00, 0x2fe00, 0x21000
++};
++
++void tulip_touch_poll(void);
++void
++tulip_touch_poll(void)
++{
++	static uint64_t next_ns;
++	static uint8_t last[6][8];
++	uint64_t ns = 0;
++	uint8_t b[8];
++	size_t i;
++	int muted;
++
++	if (!tt_ready) {
++		return;
++	}
++	absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
++	if (ns < next_ns) {
++		return;
++	}
++	next_ns = ns + 300000000ULL;
++	for (i = 0; i < sizeof(tt_nvt_pages) / sizeof(tt_nvt_pages[0]); i++) {
++		if (tt_nvt_read(tt_nvt_pages[i], b, 8) != 0) {
++			continue;
++		}
++		if (memcmp(b, last[i], 8) != 0) {
++			memcpy(last[i], b, 8);
++			if (tt_nvt_lines++ < 300) {
++				muted = sweet_console_muted;
++				sweet_console_muted = 0;
++				printf("TULIP NVT: page 0x%05x irq %d  %02x %02x %02x %02x %02x %02x %02x %02x\n",
++				    tt_nvt_pages[i], tt_get(67), b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
++				sweet_console_muted = muted;
++			}
++		}
++	}
++}
++
++static void
++tulip_touch_nvt_thread(void *arg, wait_result_t w)
++{
++	uint8_t b[8];
++	int muted, a, rc, found = 0;
++
++	(void)arg; (void)w;
++	tt_spin = 1;
++	tt_nap(5 * hz);
++	tt_spin = 0;
++	muted = sweet_console_muted;
++	sweet_console_muted = 0;
++	tt_a = (volatile uint32_t *)ml_io_map(0x03102000, 0x2000);
++	tt_b = (volatile uint32_t *)ml_io_map(0x03942000, 0x2000);
++	tt_set(67, 0, 0, 3);
++	tt_set(66, 1, 1, 0);
++	tulip_udelay(2000);
++	tt_set(66, 1, 0, 0);
++	tulip_udelay(5000);
++	tt_set(66, 1, 1, 0);
++	tulip_udelay(300000);
++	tt_sda(1); tt_scl(1);
++	printf("TULIP NVT: setup, idle SDA %d SCL %d irq %d\n", tt_get(2), tt_get(3), tt_get(67));
++	for (a = 0x08; a < 0x78; a++) {
++		tt_start();
++		rc = tt_wbyte((uint8_t)(a << 1));
++		tt_stop();
++		if (rc) {
++			printf("TULIP NVT: ACK at 0x%02x\n", a);
++			found++;
++		}
++	}
++	/* chip trim id lives at 0x1f64e on the NT36xxx family */
++	rc = tt_nvt_read(0x1f64e, b, 6);
++	printf("TULIP NVT: chip id rc %d  %02x %02x %02x %02x %02x %02x\n", rc,
++	    b[0], b[1], b[2], b[3], b[4], b[5]);
++	rc = tt_nvt_read(0x11e00, b, 8);
++	printf("TULIP NVT: page 0x11e00 rc %d  %02x %02x %02x %02x %02x %02x %02x %02x\n", rc,
++	    b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
++	sweet_console_muted = muted;
++	tt_ready = (found > 0);
++}
++
+ static void
+ tulip_touch_start(void)
+ {
+ 	thread_t th;
+ 	uint32_t on = 0;
+ 
+-	if (!PE_parse_boot_argn("touchprobe", &on, sizeof(on)) || (on != 1 && on != 2)) {
++	if (!PE_parse_boot_argn("touchprobe", &on, sizeof(on)) || (on < 1 || on > 3)) {
++		return;
++	}
++	if (on == 3) {
++		if (kernel_thread_start(tulip_touch_nvt_thread, NULL, &th) == KERN_SUCCESS) {
++			thread_deallocate(th);
++		}
+ 		return;
+ 	}
+ 	tt_spin = (on == 2);
+@@ -4627,6 +4758,7 @@
+ 				    (unsigned long long)tulip_irq_spur);
+ 			}
+ 		}
++		tulip_touch_poll();
+ 	}
+ 	return error;
+ }

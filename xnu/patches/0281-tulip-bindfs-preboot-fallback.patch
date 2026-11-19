@@ -1,0 +1,29 @@
+--- a/bsd/miscfs/bindfs/bind_vfsops.c
++++ b/bsd/miscfs/bindfs/bind_vfsops.c
+@@ -162,6 +162,26 @@
+ 	}
+ 
+ 	error = vnode_lookup(data, 0, &lowerrootvp, ctx);
++#if defined(ARM64_BOARD_CONFIG_VINCE)
++	/*
++	 * TULIP 0273: the single-volume HFS root has no /private/preboot/<hash>
++	 * volume, so /sbin/mount's firmware bind fails with ENOENT and
++	 * mount-phase-1 panics. Retry with the path below the hash directory
++	 * (/usr/standalone/firmware on the root itself).
++	 */
++	if (error == ENOENT && strncmp(data, "/private/preboot/", 17) == 0) {
++		char *rest = data + 17;
++
++		while (*rest != '\0' && *rest != '/') {
++			rest++;
++		}
++
++		if (*rest == '/') {
++			printf("TULIP BindFS: %s missing, using %s\n", data, rest);
++			error = vnode_lookup(rest, 0, &lowerrootvp, ctx);
++		}
++	}
++#endif
+ 	if (error) {
+ 		BINDFSERROR("lookup of %s failed error: %d\n", data, error);
+ 		goto error;
