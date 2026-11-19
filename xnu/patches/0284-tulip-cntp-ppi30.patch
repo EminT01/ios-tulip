@@ -1,0 +1,75 @@
+--- a/pexpert/arm/pe_fiq.c
++++ b/pexpert/arm/pe_fiq.c
+@@ -192,6 +192,41 @@
+ 		gicr_write32(GICR_IPRIORITYR0 + i, 0xA0A0A0A0);
+ 	}
+ 	gicr_write32(GICR_ISENABLER0, (1U << sweet_vtimer_intid) | (1U << SWEET_IPI_SGI));
++#if defined(VINCE_TULIP)
++	/*
++	 * TULIP 0284: the virtual timer never reaches this core.
++	 *
++	 * 0282/0283 read back CNTV_CTL 0x5 with CVAL already in the past, and
++	 * GICR_ISPENDR0 0x40200000 - PPI 30 and PPI 22 pending, bit 19 clear.
++	 * So the vtimer PPI is not routed to this redistributor at all (TrustZone
++	 * owns it), while the EL1 physical timer's PPI 30 does reach it; it just
++	 * was never enabled.
++	 *
++	 * Enabling 30 keeps the same architected timer at the same rate through
++	 * CNTPCT/CNTP_CVAL, which the kernel can read like CNTVCT. Read back what
++	 * the redistributor actually kept so the next boot says whether the write
++	 * takes at all, and arm CNTP so PPI 30 has something to deliver.
++	 */
++	gicr_write32(GICR_ISENABLER0,
++	    (1U << sweet_vtimer_intid) | (1U << 19) | (1U << 22) |
++	    (1U << 30) | (1U << SWEET_IPI_SGI));
++	gicr_write32(GICR_IPRIORITYR0 + (30 / 4) * 4, 0xA0A0A0A0);
++	{
++		uint32_t enab_rb = gicr_read32(GICR_ISENABLER0);
++		uint32_t pend_rb = gicr_read32(GICR_ISPENDR0);
++		uint64_t cntfrq, cntpct;
++
++		__asm__ volatile ("mrs %0, cntfrq_el0" : "=r"(cntfrq));
++		__asm__ volatile ("mrs %0, cntpct_el0" : "=r"(cntpct));
++		__builtin_arm_wsr64("CNTP_CVAL_EL0", cntpct + cntfrq / 1000);
++		__builtin_arm_wsr64("CNTP_CTL_EL0", 1);
++		__builtin_arm_isb(ISB_SY);
++		kprintf("TULIP GIC284: vtimer %u enab_rb 0x%08x pend_rb 0x%08x "
++		    "cntfrq %llu cntp_ctl 0x%llx\n", sweet_vtimer_intid,
++		    enab_rb, pend_rb, cntfrq,
++		    __builtin_arm_rsr64("CNTP_CTL_EL0"));
++	}
++#endif /* VINCE_TULIP */
+ #else
+ 	// Configure timers and legacy FIQ to be group 0
+ 	gicr_write32(GICR_IGROUPR0, 0x81FFFFFF);
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1903,10 +1903,27 @@
+ 	if (intid >= 1020 && intid <= 1023) {
+ 		return; /* spurious */
+ 	}
+-	if (intid == sweet_vtimer_intid) {
++	if (intid == sweet_vtimer_intid || intid == 30) {
++		/*
++		 * TULIP 0284: the EL1 physical timer (PPI 30) stands in for the
++		 * virtual timer. 0282/0283 showed CNTV expires (CTL 0x5, CVAL in
++		 * the past) while GICR_ISPENDR0 reports bit 30 and not bit 19, so
++		 * this redistributor only ever sees the physical PPI. Both are the
++		 * same architected counter family, so the tick treatment is
++		 * identical; CNTP is re-armed here before the EOI.
++		 */
+ 		sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_TIMER);
+ 		cdp->cpu_decrementer = -1; /* Large */
+ 		INTERRUPT_MASKED_DEBUG_START(rtclock_intr, DBG_INTR_TYPE_TIMER);
++		if (intid == 30) {
++			uint64_t cntfrq, cntpct;
++
++			__asm__ volatile ("mrs %0, cntfrq_el0" : "=r"(cntfrq));
++			__asm__ volatile ("mrs %0, cntpct_el0" : "=r"(cntpct));
++			__builtin_arm_wsr64("CNTP_CVAL_EL0",
++			    cntpct + cntfrq / 1000);
++			__builtin_arm_wsr64("CNTP_CTL_EL0", 1);
++		}
+ 		rtclock_intr(TRUE);
+ 		INTERRUPT_MASKED_DEBUG_END();
+ 		__builtin_arm_wsr64("ICC_EOIR1_EL1", iar);
