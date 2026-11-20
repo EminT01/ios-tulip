@@ -1,0 +1,50 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -502,6 +502,11 @@
+ /* ------------------------------------------------- SDHCI standard registers */
+ #define SDHCI_SDMA_ADDR         0x00
+ #define SDHCI_BLOCK_SIZE        0x04
++/* TULIP 0302: the SDMA path dies in the command issue; read what the core says it can do */
++#define SDHCI_CAPABILITIES      0x40
++#define SDHCI_CAP_ADMA2         (1u << 19)      /* ADMA2 supported */
++#define SDHCI_CAP_ADMA2_64      (1u << 20)      /* ADMA2 64-bit addressing */
++#define SDHCI_CAP_SDMA          (1u << 22)      /* Simple DMA supported */
+ #define SDHCI_BLOCK_COUNT       0x06
+ #define SDHCI_ARGUMENT          0x08
+ #define SDHCI_TRANSFER_MODE     0x0c
+@@ -1807,6 +1812,23 @@
+ 	 */
+ 	printf("TULIP SDMA: enter idx %u arg %x count %u pa %x mode %x\n",
+ 	    index, arg, count, (uint32_t)pa, tr_mode);
++	{
++		/*
++		 * TULIP 0302: TRNS_DMA is one bit for both engines. If this core
++		 * advertises ADMA2 and the host is put in ADMA mode, the controller
++		 * fetches a descriptor table from some address that was never
++		 * written here; that is a plausible way to lose the phone inside
++		 * sdhci_cmd(). Print what the core claims before the transfer.
++		 */
++		uint32_t cap = hc_rd(SDHCI_CAPABILITIES);
++
++		printf("TULIP SDMA: CAP 0x%08x SDMA %u ADMA2 %u ADMA2_64 %u "
++		    "width_mask 0x%x\n", cap,
++		    (cap & SDHCI_CAP_SDMA) ? 1u : 0u,
++		    (cap & SDHCI_CAP_ADMA2) ? 1u : 0u,
++		    (cap & SDHCI_CAP_ADMA2_64) ? 1u : 0u,
++		    (cap >> 16) & 0x7u);
++	}
+ 
+ 	tulip_data_moved = false;
+ 	tulip_sdma_active = true;
+@@ -1815,7 +1837,10 @@
+ 	printf("TULIP SDMA: SDMA_ADDR written 0x%08x, BLOCK_SIZE 0x%04x\n",
+ 	    (uint32_t)pa, hc_rd16(SDHCI_BLOCK_SIZE));
+ 	sdhci_set_block(count);
+-	printf("TULIP SDMA: block set, issuing command\n");
++	printf("TULIP SDMA: block set: BLOCK_SIZE 0x%04x BLOCK_COUNT 0x%04x "
++	    "HOST_CONTROL1 0x%02x\n", hc_rd16(SDHCI_BLOCK_SIZE),
++	    hc_rd16(SDHCI_BLOCK_COUNT), hc_rd8(SDHCI_HOST_CONTROL));
++	printf("TULIP SDMA: issuing command\n");
+ 	error = sdhci_cmd(index, arg, tr_mode,
+ 	    SDHCI_CMD_RESP_SHORT | SDHCI_CMD_CRC | SDHCI_CMD_INDEX |
+ 	    SDHCI_CMD_DATA, &tulip_data_r1);
