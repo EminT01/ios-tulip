@@ -1,0 +1,34 @@
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -200,10 +200,29 @@
+ 	/* TULIP 0296: after SpringBoard opens the BoundingPath asset, log its syscalls (no boot-arg needed) */
+ 	if (__improbable(tulip_bp_armed) && tulip_bp_budget > 0 &&
+ 	    strncmp(proc->p_comm, "SpringBoard", MAXCOMLEN) == 0) {
++		char bpp[100];
++		size_t bpl = 0;
++		user_addr_t bpa = 0;
++
+ 		tulip_bp_budget--;
+-		printf("TULIP BP: sc %d a0 %llx a1 %llx a2 %llx err %d ret %d\n", code,
++		bpp[0] = 0;
++		/* TULIP 0298: show the path of the path-taking calls (open/stat/lstat/access/readlink/getattrlist/openat) */
++		switch (code) {
++		case 5: case 33: case 58: case 188: case 190: case 216: case 220: case 338: case 340: case 398:
++			bpa = (user_addr_t)uthread->uu_arg[0];
++			break;
++		case 463: case 464:
++			bpa = (user_addr_t)uthread->uu_arg[1];
++			break;
++		default:
++			break;
++		}
++		if (bpa != 0 && copyinstr(bpa, bpp, sizeof(bpp), &bpl) != 0) {
++			bpp[0] = 0;
++		}
++		printf("TULIP BP: sc %d a0 %llx a1 %llx err %d ret %d%s%s\n", code,
+ 		    (unsigned long long)uthread->uu_arg[0], (unsigned long long)uthread->uu_arg[1],
+-		    (unsigned long long)uthread->uu_arg[2], error, (int)uthread->uu_rval[0]);
++		    error, (int)uthread->uu_rval[0], bpp[0] ? " " : "", bpp);
+ 	}
+ #endif
+ 
