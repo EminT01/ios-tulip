@@ -1,0 +1,44 @@
+--- a/bsd/dev/vince_bt.c
++++ b/bsd/dev/vince_bt.c
+@@ -709,6 +709,8 @@
+ int vince_trace_on;
+ static char vince_trace_name[MAXCOMLEN + 1];
+ static int vince_trace_budget = 8000;
++static int vince_trace_mark;   /* boot-arg tulipbpmark=1: stay silent until a BoundingPath open */
++static int vince_trace_armed;
+ 
+ void
+ vince_sc_trace(const char *comm, int code, uint64_t *arg, int error, int ret, int exit_entry, uint64_t pc,
+@@ -727,7 +729,7 @@
+ 	vince_trace_budget--;
+ 	path[0] = 0;
+ 	switch (code) {
+-	case 5: case 8: case 10: case 15: case 33: case 58: case 188: case 190: case 338: case 341: case 5000:
++	case 5: case 8: case 10: case 15: case 33: case 58: case 188: case 190: case 338: case 341: case 398: case 5000:
+ 		haspath = copyinstr((user_addr_t)arg[0], path, sizeof(path), &len) == 0;
+ 		break;
+ 	case 463:
+@@ -736,6 +738,15 @@
+ 	default:
+ 		break;
+ 	}
++	if (vince_trace_mark && !vince_trace_armed && !exit_entry) {
++		if (haspath && strnstr(path, "BoundingPath", sizeof(path)) != NULL) {
++			vince_trace_armed = 1;
++			vince_trace_budget = 400;
++		} else {
++			vince_trace_budget++;
++			return;
++		}
++	}
+ 	if (exit_entry) {
+ 		uint64_t fr[2];
+ 		const uint64_t mask = 0x7fffffffffULL;
+@@ -759,6 +770,7 @@
+ {
+ 	if (PE_parse_boot_argn("vincetrace", vince_trace_name, sizeof(vince_trace_name)) && vince_trace_name[0]) {
+ 		vince_trace_on = 1;
++		(void)PE_parse_boot_argn("tulipbpmark", &vince_trace_mark, sizeof(vince_trace_mark));
+ 		printf("TULIP TRC: tracing syscalls of \"%s\"\n", vince_trace_name);
+ 	}
+ }
