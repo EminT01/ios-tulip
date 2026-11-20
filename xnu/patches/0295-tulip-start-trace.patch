@@ -1,0 +1,19 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -1411,6 +1411,7 @@
+ static int sdhci_enable_card_clock(void);
+ extern void sweet_sample_start(void);
+ extern void tulip_sync_start(void);
++extern void vince_bt_start(void);
+ static bool sdhci_ext_csd_sane(void);
+ static void sdhci_ext_csd_clear(void);
+ 
+@@ -5773,6 +5774,8 @@
+ 	sweet_sample_start();
+ 	/* TULIP 0252: periodic sync of the journal-less root */
+ 	tulip_sync_start();
++	/* TULIP 0295: vince_smd_start() never runs on tulip, so boot-arg vincetrace= was never read */
++	vince_bt_start();
+ 	/* TULIP 0271: FTS touch probe (boot-arg touchprobe=1) */
+ 	tulip_touch_start();
+ 	return 0;

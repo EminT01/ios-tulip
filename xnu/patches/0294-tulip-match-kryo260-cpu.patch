@@ -1,0 +1,33 @@
+--- a/iokit/KernelConfigTables.cpp
++++ b/iokit/KernelConfigTables.cpp
+@@ -57,7 +57,12 @@
+     "   {"
+     "     'IOClass'         = SweetCPU;"
+     "     'IOProviderClass' = IOPlatformDevice;"
++#if defined(VINCE_TULIP)
++    /* TULIP 0294: tools/mkadt_tulip.py gives the cpu nodes compatible "qcom,kryo260", never "qcom,cortex-a53" */
++    "     'IONameMatch'     = ('qcom,kryo260', 'qcom,cortex-a53');"
++#else
+     "     'IONameMatch'     = 'qcom,cortex-a53';"
++#endif
+     "     'IOProbeScore'    = 10000:32;"
+     "   },"
+     "   {"
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -289,6 +289,15 @@
+ 	OSData *reg = OSDynamicCast(OSData, provider->getProperty("reg"));
+ 
+ 	tulip_cpu_topo = topology->num_cpus;
++#if defined(VINCE_TULIP)
++	{
++		/* TULIP 0294: SweetCPU is matched for the first time on tulip; opt in with boot-arg tulipcpu=1 */
++		uint32_t en = 0;
++		if (!PE_parse_boot_argn("tulipcpu", &en, sizeof(en)) || en == 0) {
++			return false;
++		}
++	}
++#endif
+ 	tulip_cpu_calls++;
+ 	if (logical == NULL || reg == NULL || reg->getLength() != sizeof(uint32_t) ||
+ 	    logical->unsigned32BitValue() >= topology->num_cpus) {
