@@ -1,0 +1,33 @@
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -196,6 +196,30 @@
+ 	if (__improbable(vince_trace_on)) {
+ 		vince_sc_trace(proc->p_comm, code, &uthread->uu_arg[0], error, (int)uthread->uu_rval[0], 0, 0, 0, 0);
+ 	}
++	/*
++	 * TULIP 0298: SpringBoard maps the 100 KB BoundingPath Assets.car and then reports it unreadable.
++	 * Read back what the mapping really contains (this also forces the page-in) and print 8 bytes
++	 * at seven non-zero offsets, to tell a broken file-mapping path from a CoreUI problem.
++	 */
++	if (code == 197 && error == 0 && uthread->uu_arg[1] >= 0x18000 && uthread->uu_arg[1] <= 0x20000 &&
++	    strncmp(proc->p_comm, "SpringBoard", MAXCOMLEN) == 0) {
++		static int tulip_mm_prints;
++
++		if (tulip_mm_prints < 6) {
++			static const uint32_t offs[7] = { 0, 0x3000, 0x6000, 0x8000, 0xc000, 0x14000, 0x19000 };
++			uint8_t b[8];
++			int i;
++
++			tulip_mm_prints++;
++			printf("TULIP MMAP: addr %llx len %llx\n", (unsigned long long)uthread->uu_rval[0],
++			    (unsigned long long)uthread->uu_arg[1]);
++			for (i = 0; i < 7; i++) {
++				int e = copyin((user_addr_t)(uthread->uu_rval[0] + offs[i]), b, sizeof(b));
++				printf("TULIP MMAP: +%x err %d %02x%02x%02x%02x%02x%02x%02x%02x\n", offs[i], e,
++				    b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
++			}
++		}
++	}
+ #endif
+ 
+ #if CONFIG_MACF
