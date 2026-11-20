@@ -45,49 +45,6 @@
  				extern volatile uint64_t tulip_irq_timer, tulip_irq_ipi, tulip_irq_other, tulip_irq_spur;
  				extern volatile uint32_t tulip_irq_lastother;
  
---- a/bsd/dev/arm/systemcalls.c
-+++ b/bsd/dev/arm/systemcalls.c
-@@ -197,6 +197,40 @@
- 	if (__improbable(vince_trace_on)) {
- 		vince_sc_trace(proc->p_comm, code, &uthread->uu_arg[0], error, (int)uthread->uu_rval[0], 0, 0, 0, 0);
- 	}
-+	/*
-+	 * TULIP 0309: SpringBoard reports the 100 KB BoundingPath Assets.car as
-+	 * unreadable after mapping it. Read back what the mapping really holds
-+	 * (this also forces the page-in) and print 8 bytes at seven offsets, to
-+	 * tell a broken file-mapping path from a CoreUI asset problem.
-+	 *
-+	 * Only a file mapping matters: 0298 matched on length alone and caught an
-+	 * anonymous heap mapping at 0xe000000 (len 0x20000) instead, where copyin
-+	 * then failed with EFAULT and the log said nothing about the asset. A real
-+	 * file mapping carries a descriptor in arg[4].
-+	 */
-+	if (code == 197 && error == 0 &&
-+	    uthread->uu_arg[1] >= 0x18000 && uthread->uu_arg[1] <= 0x20000 &&
-+	    (int)uthread->uu_arg[4] >= 0 &&
-+	    strncmp(proc->p_comm, "SpringBoard", MAXCOMLEN) == 0) {
-+		static int tulip_mm_prints;
-+
-+		if (tulip_mm_prints < 6) {
-+			static const uint32_t offs[7] = { 0, 0x3000, 0x6000, 0x8000, 0xc000, 0x14000, 0x19000 };
-+			uint8_t b[8];
-+			int i;
-+
-+			tulip_mm_prints++;
-+			printf("TULIP MMAP: addr %llx len %llx fd %d\n",
-+			    (unsigned long long)uthread->uu_rval[0],
-+			    (unsigned long long)uthread->uu_arg[1],
-+			    (int)uthread->uu_arg[4]);
-+			for (i = 0; i < 7; i++) {
-+				int e = copyin((user_addr_t)(uthread->uu_rval[0] + offs[i]), b, sizeof(b));
-+				printf("TULIP MMAP: +%x err %d %02x%02x%02x%02x%02x%02x%02x%02x\n",
-+				    offs[i], e, b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
-+			}
-+		}
-+	}
- 	/* TULIP 0296: after SpringBoard opens the BoundingPath asset, log its syscalls (no boot-arg needed) */
- 	if (__improbable(tulip_bp_armed) && tulip_bp_budget > 0 &&
- 	    strncmp(proc->p_comm, "SpringBoard", MAXCOMLEN) == 0) {
 --- a/iokit/Kernel/arm/SweetCPU.cpp
 +++ b/iokit/Kernel/arm/SweetCPU.cpp
 @@ -176,7 +176,12 @@
