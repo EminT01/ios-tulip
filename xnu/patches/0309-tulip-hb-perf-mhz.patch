@@ -1,0 +1,137 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -4921,6 +4921,44 @@
+ 			    (unsigned long long)sweet_sample_wakes,
+ 			    (unsigned long long)tulip_perf_emmc_reads);
+ 			{
++				/*
++				 * TULIP 0309: the PERF line lives in sweet_sample.c, which
++				 * returns at once when sweetsample=- (the usual boot-arg for
++				 * a quiet log), so the eMMC throughput never appeared in the
++				 * readings it exists for. Print it from the heartbeat, which
++				 * always runs, and add the card clock so a 25/50 MHz change
++				 * shows up next to the number.
++				 */
++				extern unsigned int processor_avail_count, processor_count;
++				extern uint64_t tulip_perf_con_ticks, tulip_perf_con_bytes;
++				extern uint64_t tulip_perf_emmc_ticks, tulip_perf_emmc_blocks;
++				uint64_t con_ns = 0;
++				uint64_t emmc_ns = 0;
++
++				absolutetime_to_nanoseconds(tulip_perf_con_ticks, &con_ns);
++				absolutetime_to_nanoseconds(tulip_perf_emmc_ticks, &emmc_ns);
++				printf("TULIP PERF: cpus online %u/%u, up %llu s, "
++				    "console %llu ms (%llu bytes), eMMC %llu ms "
++				    "(%llu reads, %llu MiB), clk %u MHz\n",
++				    processor_avail_count, processor_count,
++				    hb_ns / 1000000000ULL, con_ns / 1000000ULL,
++				    (unsigned long long)tulip_perf_con_bytes,
++				    emmc_ns / 1000000ULL,
++				    (unsigned long long)tulip_perf_emmc_reads,
++				    (unsigned long long)(tulip_perf_emmc_blocks >> 11),
++				    se.clk_mhz);
++				{
++					/* TULIP 0309: per-core clock, Silver 0-3 then Gold 4-7 */
++					extern uint32_t tulip_cpu_mhz[8];
++
++					printf("TULIP MHZ: %u %u %u %u %u %u %u %u\n",
++					    tulip_cpu_mhz[0], tulip_cpu_mhz[1],
++					    tulip_cpu_mhz[2], tulip_cpu_mhz[3],
++					    tulip_cpu_mhz[4], tulip_cpu_mhz[5],
++					    tulip_cpu_mhz[6], tulip_cpu_mhz[7]);
++				}
++			}
++			{
+ 				extern volatile uint64_t tulip_irq_timer, tulip_irq_ipi, tulip_irq_other, tulip_irq_spur;
+ 				extern volatile uint32_t tulip_irq_lastother;
+ 
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -197,6 +197,40 @@
+ 	if (__improbable(vince_trace_on)) {
+ 		vince_sc_trace(proc->p_comm, code, &uthread->uu_arg[0], error, (int)uthread->uu_rval[0], 0, 0, 0, 0);
+ 	}
++	/*
++	 * TULIP 0309: SpringBoard reports the 100 KB BoundingPath Assets.car as
++	 * unreadable after mapping it. Read back what the mapping really holds
++	 * (this also forces the page-in) and print 8 bytes at seven offsets, to
++	 * tell a broken file-mapping path from a CoreUI asset problem.
++	 *
++	 * Only a file mapping matters: 0298 matched on length alone and caught an
++	 * anonymous heap mapping at 0xe000000 (len 0x20000) instead, where copyin
++	 * then failed with EFAULT and the log said nothing about the asset. A real
++	 * file mapping carries a descriptor in arg[4].
++	 */
++	if (code == 197 && error == 0 &&
++	    uthread->uu_arg[1] >= 0x18000 && uthread->uu_arg[1] <= 0x20000 &&
++	    (int)uthread->uu_arg[4] >= 0 &&
++	    strncmp(proc->p_comm, "SpringBoard", MAXCOMLEN) == 0) {
++		static int tulip_mm_prints;
++
++		if (tulip_mm_prints < 6) {
++			static const uint32_t offs[7] = { 0, 0x3000, 0x6000, 0x8000, 0xc000, 0x14000, 0x19000 };
++			uint8_t b[8];
++			int i;
++
++			tulip_mm_prints++;
++			printf("TULIP MMAP: addr %llx len %llx fd %d\n",
++			    (unsigned long long)uthread->uu_rval[0],
++			    (unsigned long long)uthread->uu_arg[1],
++			    (int)uthread->uu_arg[4]);
++			for (i = 0; i < 7; i++) {
++				int e = copyin((user_addr_t)(uthread->uu_rval[0] + offs[i]), b, sizeof(b));
++				printf("TULIP MMAP: +%x err %d %02x%02x%02x%02x%02x%02x%02x%02x\n",
++				    offs[i], e, b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
++			}
++		}
++	}
+ 	/* TULIP 0296: after SpringBoard opens the BoundingPath asset, log its syscalls (no boot-arg needed) */
+ 	if (__improbable(tulip_bp_armed) && tulip_bp_budget > 0 &&
+ 	    strncmp(proc->p_comm, "SpringBoard", MAXCOMLEN) == 0) {
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -176,7 +176,12 @@
+ 	return f ? (uint32_t)((c1 - c0) * f / (t1 - t0) / 1000000) : 0;
+ }
+ 
+-static uint32_t gVinceMHz[8];
++/*
++ * TULIP 0309: not static any more - tulip_sdhci.c prints all eight values on
++ * its heartbeat line, so the per-core clock is visible without IOLog (which
++ * does not reach this console).
++ */
++uint32_t tulip_cpu_mhz[8];
+ 
+ /*
+  * Cluster clock muxes (Android DT qcom,cpu-clock-8953: c0-mux 0x0b111050, c1-mux 0x0b011050; CMD +0, CFG +4,
+@@ -453,7 +458,7 @@
+ #elif defined(VINCE_TULIP)
+ 	/* tulip: no MSM8953 clock tree and no 0x913F0000 mark page; the boot CPU still reports its MHz. */
+ 	if (boot && cpu->cpu_id < 8) {
+-		gVinceMHz[cpu->cpu_id] = vince_cpu_mhz();
++		tulip_cpu_mhz[cpu->cpu_id] = vince_cpu_mhz();
+ 	}
+ #endif
+ 	/*
+@@ -558,9 +563,9 @@
+ 		    seen, topology->num_cpus, seen);
+ 	} else {
+ 		kprintf("TULIP CPU: %u CPUs, initialization complete; MHz %u %u %u %u %u %u %u %u\n",
+-		    topology->num_cpus, gVinceMHz[0], gVinceMHz[1], gVinceMHz[2],
+-		    gVinceMHz[3], gVinceMHz[4], gVinceMHz[5], gVinceMHz[6],
+-		    gVinceMHz[7]);
++		    topology->num_cpus, tulip_cpu_mhz[0], tulip_cpu_mhz[1], tulip_cpu_mhz[2],
++		    tulip_cpu_mhz[3], tulip_cpu_mhz[4], tulip_cpu_mhz[5], tulip_cpu_mhz[6],
++		    tulip_cpu_mhz[7]);
+ 	}
+ }
+ #endif
+@@ -586,7 +591,7 @@
+ 	    (unsigned int)boot);
+ 	vince_smp_mark(0x31);
+ 	if (getCPUNumber() < 8) {
+-		gVinceMHz[getCPUNumber()] = vince_cpu_mhz();
++		tulip_cpu_mhz[getCPUNumber()] = vince_cpu_mhz();
+ 	}
+ #if defined(VINCE_GIC_V3)
+ 	/*
