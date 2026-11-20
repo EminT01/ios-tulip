@@ -1,17 +1,14 @@
 --- a/bsd/dev/tulip_sdhci.c
 +++ b/bsd/dev/tulip_sdhci.c
-@@ -2794,15 +2794,30 @@
+@@ -2791,21 +2791,30 @@
+ {
+ 	volatile uint32_t *g = (volatile uint32_t *)tulip_sdc1_va;
+ 	uint32_t cfg = r->cfg;
  	const char *name = r->name;
  	uint32_t mhz = 0;
  	uint64_t deadline;
 +	bool want50;
 +
-+	/*
-+	 * TULIP 0306: read the boot-arg before looking at the mapping. The old
-+	 * order returned silently when tulip_sdc1_va was NULL, so a missing
-+	 * mapping swallowed sdcmhz=50 without a word and the card stayed at
-+	 * 25 MHz. Report that case instead of vanishing.
-+	 */
 +	want50 = (r == &tulip_gcc_rates[TULIP_GCC_RATE_25M]) &&
 +	    PE_parse_boot_argn("sdcmhz", &mhz, sizeof(mhz)) && mhz == 50;
  
@@ -33,3 +30,6 @@
  	g[TULIP_SDC1_RCG_M / 4] = r->m;
  	g[TULIP_SDC1_RCG_N / 4] = r->n;
  	g[TULIP_SDC1_RCG_D / 4] = r->d;
+ 	g[TULIP_SDC1_RCG_CFG / 4] = cfg;
+ 	g[TULIP_SDC1_RCG_CMD / 4] = g[TULIP_SDC1_RCG_CMD / 4] | 0x3u;
+ 	nanoseconds_to_absolutetime(500ull * NSEC_PER_USEC, &deadline);
