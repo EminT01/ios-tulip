@@ -1,0 +1,18 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -1207,6 +1207,15 @@
+ 	start = mach_absolute_time();
+ 	hc_wr(SDHCI_TRANSFER_MODE,
+ 	    ((uint32_t)SDHCI_MAKE_CMD(index, flags) << 16) | tr_mode);
++	/*
++	 * TULIP 0304: with sdcsdma=1 the log stops at "issuing command" and the
++	 * next line never appears, so either the write above or the first poll
++	 * of the loop is where the phone goes. Print the state right after the
++	 * register pair is written, before the loop reads anything.
++	 */
++	printf("TULIP SDMA: mode written (cmd %u mode 0x%x) INT_STATUS "
++	    "0x%08x PRESENT_STATE 0x%08x\n", index, tr_mode,
++	    hc_rd(SDHCI_INT_STATUS), hc_rd(SDHCI_PRESENT_STATE));
+ 
+ 	nanoseconds_to_absolutetime(CMD_TIMEOUT_NS, &deadline);
+ 	deadline += mach_absolute_time();
