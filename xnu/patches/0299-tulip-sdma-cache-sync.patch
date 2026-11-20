@@ -1,0 +1,35 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -1075,10 +1075,31 @@
+ 	    r[TULIP_SDC1_RCG_CFG / 4]);
+ }
+ 
++/*
++ * TULIP 0299: bring the bounce buffer in line with the DMA engine.
++ *
++ * This used to be flush_dcache64(), which is a no-op in this build:
++ * flush_dcache64() branches to flush_dcache(), and with __ARM_COHERENT_CACHE__
++ * set (Apple cores reset cache-coherent) that routine does nothing. The same
++ * trap is documented in osfmk/arm64/cpu.c, where flushing CpuDataEntries that
++ * way left a secondary core reading a zeroed cpu_data_t until
++ * FlushPoC_DcacheRegion() was added.
++ *
++ * So PIO "worked" only because the CPU wrote the buffer itself, and SDMA lost
++ * the burst: the engine filled DRAM while this core kept serving the stale
++ * lines from cache, which corrupts the HFS+ B-tree on the first block and
++ * reboots the phone.
++ *
++ * FlushPoC_DcacheRegion is a real DC CIVAC loop: clean + invalidate, so the
++ * next read comes from DRAM. Call it before and after every transfer.
++ */
++extern void FlushPoC_DcacheRegion(vm_offset_t va, size_t length);
++
+ static void
+ dma_sync(uint32_t len, bool is_read)
+ {
+-	flush_dcache64((addr64_t)(se.dma_pa + DMA_BOUNCE), len, is_read);
++	/* The routine ends with its own dsb sy. */
++	FlushPoC_DcacheRegion((vm_offset_t)(se.dma_pa + DMA_BOUNCE), len);
+ }
+ 
+ static int
