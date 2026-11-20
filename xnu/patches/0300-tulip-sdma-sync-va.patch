@@ -1,0 +1,22 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -1098,8 +1098,17 @@
+ static void
+ dma_sync(uint32_t len, bool is_read)
+ {
+-	/* The routine ends with its own dsb sy. */
+-	FlushPoC_DcacheRegion((vm_offset_t)(se.dma_pa + DMA_BOUNCE), len);
++	/*
++	 * TULIP 0300: FlushPoC_DcacheRegion takes a kernel virtual address, not a
++	 * physical one. 0299 passed se.dma_pa + DMA_BOUNCE, so the DC CIVAC loop
++	 * walked whatever lives at that low VA a few hundred megabytes into the
++	 * kernel map and the boot died on a translation fault (ESR 0x36000045,
++	 * FAR 0xa30dc000) in kernel_task before the first SDMA transfer.
++	 *
++	 * se.dma is the bounce buffer's kernel VA and se.dma_pa its physical
++	 * address; use the VA here. The routine ends with its own dsb sy.
++	 */
++	FlushPoC_DcacheRegion((vm_offset_t)(se.dma + DMA_BOUNCE), len);
+ }
+ 
+ static int
