@@ -1,0 +1,40 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -1800,14 +1800,27 @@
+ 		    SDHCI_TRNS_AUTO_CMD12;
+ 	}
+ 
++	/*
++	 * TULIP 0301: SDMA reboots the phone somewhere in this function and the
++	 * console says nothing, so print each step. The reboot has to be pinned
++	 * to a line: address register, command issue, or the completion wait.
++	 */
++	printf("TULIP SDMA: enter idx %u arg %x count %u pa %x mode %x\n",
++	    index, arg, count, (uint32_t)pa, tr_mode);
++
+ 	tulip_data_moved = false;
+ 	tulip_sdma_active = true;
+ 	tulip_sdma_start = (uint32_t)pa;
+ 	hc_wr(SDHCI_SDMA_ADDR, (uint32_t)pa);
++	printf("TULIP SDMA: SDMA_ADDR written 0x%08x, BLOCK_SIZE 0x%04x\n",
++	    (uint32_t)pa, hc_rd16(SDHCI_BLOCK_SIZE));
+ 	sdhci_set_block(count);
++	printf("TULIP SDMA: block set, issuing command\n");
+ 	error = sdhci_cmd(index, arg, tr_mode,
+ 	    SDHCI_CMD_RESP_SHORT | SDHCI_CMD_CRC | SDHCI_CMD_INDEX |
+ 	    SDHCI_CMD_DATA, &tulip_data_r1);
++	printf("TULIP SDMA: cmd done, error %d, INT_STATUS 0x%08x\n",
++	    error, hc_rd(SDHCI_INT_STATUS));
+ 	if (error) {
+ 		tulip_sdma_active = false;
+ 		sdhci_recover(index == 18);
+@@ -1816,6 +1829,9 @@
+ 	/* SDMA: only the engine's own state proves the burst landed. */
+ 	error = sdhci_wait_transfer_complete("SDMA block", false,
+ 	    index == 18);
++	printf("TULIP SDMA: wait done, error %d, INT_STATUS 0x%08x "
++	    "ADDR 0x%08x\n", error, hc_rd(SDHCI_INT_STATUS),
++	    hc_rd(SDHCI_SDMA_ADDR));
+ 	tulip_sdma_active = false;
+ 	if (error) {
+ 		sdhci_recover(index == 18);
