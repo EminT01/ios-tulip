@@ -1,0 +1,105 @@
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -95,6 +95,49 @@
+ }
+ #endif /* VINCE_GIC_V3 */
+ 
++#if defined(VINCE_GIC_V3)
++extern "C" volatile uint32_t tulip_sgi_seen[16];
++extern "C" volatile uint32_t tulip_sgi_mask;
++
++/*
++ * TULIP 0297: SGI1 never arrives (self-test timed out). Send each of SGI 0-15 to this
++ * CPU in turn and record which ones come back, so the log says which SGIs the
++ * TrustZone-split GIC lets EL1 use. Returns a bit mask.
++ */
++static uint32_t
++tulip_sgi_sweep(uint64_t mpidr)
++{
++	uint32_t mask = 0;
++	vm_offset_t rd = vince_gicr_for(mpidr);
++
++	if (rd) {
++		*(volatile uint32_t *)(rd + GICR_ISENABLER0) = 0xffff;
++		__builtin_arm_dsb(DSB_SY);
++	}
++	for (unsigned int n = 0; n < 16; n++) {
++		uint32_t before = tulip_sgi_seen[n];
++		uint64_t deadline;
++		uint64_t sgi = (((mpidr >> 32) & 0xff) << 48) |
++		    (((mpidr >> 16) & 0xff) << 32) |
++		    (((mpidr >> 8) & 0xff) << 16) |
++		    ((uint64_t)n << 24) | (1ULL << (mpidr & 0xf));
++
++		nanoseconds_to_deadline(5 * 1000 * 1000, &deadline);
++		__builtin_arm_dsb(DSB_ISHST);
++		__builtin_arm_wsr64("ICC_SGI1R_EL1", sgi);
++		__builtin_arm_isb(ISB_SY);
++		while (tulip_sgi_seen[n] == before && mach_absolute_time() < deadline) {
++			__asm__ volatile ("yield");
++		}
++		if (tulip_sgi_seen[n] != before) {
++			mask |= 1U << n;
++		}
++	}
++	tulip_sgi_mask = mask | 0x80000000U;
++	return mask;
++}
++#endif /* VINCE_GIC_V3 */
++
+ /* SMC64 PSCI call (x0 = function, x1..x3 = arguments); TZ returns the status in x0 */
+ static int64_t
+ vince_psci(uint64_t fn, uint64_t a1, uint64_t a2, uint64_t a3)
+@@ -651,7 +694,14 @@
+ 		}
+ #endif
+ 		if (mach_absolute_time() > deadline) {
++#if defined(VINCE_GIC_V3)
++			uint32_t m = tulip_sgi_sweep(fPhysId);
++			kprintf("TULIP CPU: SGI1 self-test timed out on cpu %u; SGIs that arrived: mask 0x%x\n",
++			    getCPUNumber(), m);
++			break;
++#else
+ 			panic("TULIP CPU: SGI1 self-test timed out on cpu %u", getCPUNumber());
++#endif
+ 		}
+ 		__asm__ volatile("yield");
+ 	}
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1849,6 +1849,9 @@
+ 
+ /* TULIP 0279: interrupt counters shown by the TULIP HB2 line */
+ volatile uint64_t tulip_irq_timer, tulip_irq_ipi, tulip_irq_other, tulip_irq_spur;
++/* TULIP 0297: how many times each SGI 0-15 arrived (shown by HB6) */
++volatile uint32_t tulip_sgi_seen[16];
++volatile uint32_t tulip_sgi_mask;
+ /* TULIP 0284: PPI 30 (CNTP) tick counter, kept apart from the vtimer's. */
+ volatile uint64_t tulip_irq_cntp;
+ #if defined(VINCE_TULIP)
+@@ -2008,6 +2011,7 @@
+ 		__builtin_arm_wsr64("ICC_EOIR1_EL1", iar);
+ 	} else if (intid < 16) {
+ 		tulip_irq_ipi++;
++		tulip_sgi_seen[intid & 15]++;
+ 		sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_IPI);
+ 		/* Ack before handling so an IPI raised meanwhile is not lost */
+ 		__builtin_arm_wsr64("ICC_EOIR1_EL1", iar);
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -4815,6 +4815,15 @@
+ 				    (unsigned long long)tulip_irq_other, tulip_irq_lastother,
+ 				    (unsigned long long)tulip_irq_spur);
+ 			{
++				extern volatile uint32_t tulip_sgi_seen[16], tulip_sgi_mask;
++
++				printf("TULIP HB6: sgi mask 0x%x seen %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u\n",
++				    tulip_sgi_mask, tulip_sgi_seen[0], tulip_sgi_seen[1], tulip_sgi_seen[2], tulip_sgi_seen[3],
++				    tulip_sgi_seen[4], tulip_sgi_seen[5], tulip_sgi_seen[6], tulip_sgi_seen[7],
++				    tulip_sgi_seen[8], tulip_sgi_seen[9], tulip_sgi_seen[10], tulip_sgi_seen[11],
++				    tulip_sgi_seen[12], tulip_sgi_seen[13], tulip_sgi_seen[14], tulip_sgi_seen[15]);
++			}
++			{
+ 				extern volatile uint32_t tulip_cpu_stage[8], tulip_cpu_rej, tulip_cpu_topo, tulip_cpu_calls;
+ 				extern volatile int64_t tulip_cpu_psci[8];
+ 				extern volatile int32_t tulip_cpu_pres[8];
