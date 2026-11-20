@@ -1,0 +1,49 @@
+--- a/bsd/vfs/vfs_syscalls.c
++++ b/bsd/vfs/vfs_syscalls.c
+@@ -4555,6 +4555,10 @@
+  *
+  * XXX Need to implement uid, gid
+  */
++/* TULIP 0296: set when SpringBoard opens the BoundingPath Assets.car; systemcalls.c then logs its syscalls */
++volatile int tulip_bp_armed;
++volatile int tulip_bp_budget;
++
+ int
+ open1(vfs_context_t ctx, struct nameidata *ndp, int uflags,
+     struct vnode_attr *vap, fp_initfn_t fp_init, void *initarg, int32_t *retval, int authfd)
+@@ -4648,6 +4652,10 @@
+ 	error = vn_open_auth(ndp, &flags, vap, authvp);
+ 	if (tulip_bpm) {
+ 		printf("TULIP OPEN2: pid %d '%s' -> %d\n", proc_getpid(p), tulip_bp, error);
++		if (error == 0 && strnstr(tulip_bp, "Assets.car", sizeof(tulip_bp)) != NULL) {
++			tulip_bp_budget = 300;
++			tulip_bp_armed = 1;
++		}
+ 	}
+ 	if (error) {
+ 		if (authvp != NULLVP) {
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -46,6 +46,7 @@
+ 
+ #if defined(ARM64_BOARD_CONFIG_VINCE)
+ extern int vince_trace_on;
++extern volatile int tulip_bp_armed, tulip_bp_budget;
+ extern void vince_sc_trace(const char *comm, int code, uint64_t *arg, int error, int ret, int exit_entry, uint64_t pc,
+     uint64_t lr, uint64_t fp);
+ #endif
+@@ -196,6 +197,14 @@
+ 	if (__improbable(vince_trace_on)) {
+ 		vince_sc_trace(proc->p_comm, code, &uthread->uu_arg[0], error, (int)uthread->uu_rval[0], 0, 0, 0, 0);
+ 	}
++	/* TULIP 0296: after SpringBoard opens the BoundingPath asset, log its syscalls (no boot-arg needed) */
++	if (__improbable(tulip_bp_armed) && tulip_bp_budget > 0 &&
++	    strncmp(proc->p_comm, "SpringBoard", MAXCOMLEN) == 0) {
++		tulip_bp_budget--;
++		printf("TULIP BP: sc %d a0 %llx a1 %llx a2 %llx err %d ret %d\n", code,
++		    (unsigned long long)uthread->uu_arg[0], (unsigned long long)uthread->uu_arg[1],
++		    (unsigned long long)uthread->uu_arg[2], error, (int)uthread->uu_rval[0]);
++	}
+ #endif
+ 
+ #if CONFIG_MACF
