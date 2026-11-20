@@ -1,0 +1,28 @@
+--- a/bsd/vfs/vfs_syscalls.c
++++ b/bsd/vfs/vfs_syscalls.c
+@@ -4632,7 +4632,24 @@
+ 			printf("TULIP OPEN: pid %d fl 0x%x '%s'\n", proc_getpid(p), uflags, tb);
+ 		}
+ 	}
+-	if ((error = vn_open_auth(ndp, &flags, vap, authvp))) {
++	char tulip_bp[128];
++	int tulip_bpm = 0;
++	{
++		/* TULIP 0291: trace opens of the UIKit bounding path asset */
++		size_t bl = 0;
++		tulip_bp[0] = 0;
++		if (ndp->ni_segflg == UIO_SYSSPACE) {
++			strlcpy(tulip_bp, CAST_DOWN(char *, ndp->ni_dirp), sizeof(tulip_bp));
++		} else {
++			(void)copyinstr(ndp->ni_dirp, tulip_bp, sizeof(tulip_bp), &bl);
++		}
++		tulip_bpm = (strnstr(tulip_bp, "BoundingPath", sizeof(tulip_bp)) != NULL);
++	}
++	error = vn_open_auth(ndp, &flags, vap, authvp);
++	if (tulip_bpm) {
++		printf("TULIP OPEN2: pid %d '%s' -> %d\n", proc_getpid(p), tulip_bp, error);
++	}
++	if (error) {
+ 		if (authvp != NULLVP) {
+ 			vnode_put(authvp);
+ 		}
