@@ -1,0 +1,30 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -506,7 +506,8 @@
+ #define SDHCI_CAPABILITIES      0x40
+ #define SDHCI_CAP_ADMA2         (1u << 19)      /* ADMA2 supported */
+ #define SDHCI_CAP_ADMA2_64      (1u << 20)      /* ADMA2 64-bit addressing */
+-#define SDHCI_CAP_SDMA          (1u << 22)      /* Simple DMA supported */
++/* SDHCI 3.0 table 2-2: bit 21 is SDMA, bit 22 is Suspend/Resume (0302 had this wrong). */
++#define SDHCI_CAP_SDMA          (1u << 21)      /* Simple DMA supported */
+ #define SDHCI_BLOCK_COUNT       0x06
+ #define SDHCI_ARGUMENT          0x08
+ #define SDHCI_TRANSFER_MODE     0x0c
+@@ -1836,6 +1837,17 @@
+ 	hc_wr(SDHCI_SDMA_ADDR, (uint32_t)pa);
+ 	printf("TULIP SDMA: SDMA_ADDR written 0x%08x, BLOCK_SIZE 0x%04x\n",
+ 	    (uint32_t)pa, hc_rd16(SDHCI_BLOCK_SIZE));
++	/*
++	 * TULIP 0303: tell the card the block length before the engine moves
++	 * anything, the way whyred's 0157 does on the same SDM636 controller.
++	 * The host-side BLOCK_SIZE register alone is not enough: eMMC answers a
++	 * data command with the length it was last told, and a mismatch on a DMA
++	 * transfer is a plausible way to lose the phone inside sdhci_cmd().
++	 */
++	(void)sdhci_cmd(16, SDHCI_BLOCK, 0,
++	    SDHCI_CMD_RESP_SHORT | SDHCI_CMD_CRC | SDHCI_CMD_INDEX, &tulip_data_r1);
++	printf("TULIP SDMA: CMD16 SET_BLOCKLEN(%u) sent, R1 0x%08x\n",
++	    SDHCI_BLOCK, tulip_data_r1);
+ 	sdhci_set_block(count);
+ 	printf("TULIP SDMA: block set: BLOCK_SIZE 0x%04x BLOCK_COUNT 0x%04x "
+ 	    "HOST_CONTROL1 0x%02x\n", hc_rd16(SDHCI_BLOCK_SIZE),
