@@ -1,0 +1,60 @@
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -449,10 +449,15 @@
+ {
+ 	uint32_t seen = os_atomic_inc(&gVinceStarted, relaxed);
+ 
++	/*
++	 * TULIP 0290: kprintf instead of IOLog so the line lands in the console
++	 * ring even when sweetiolog filters IOKit. Also say which CPU arrived.
++	 */
++	kprintf("TULIP CPU: cpu %u reached finishStart (%u/%u)\n",
++	    getCPUNumber(), seen, topology->num_cpus);
++
+ 	if (os_atomic_cmpxchg(&gVinceCompleted, 0, 1, acquire)) {
+ 		/* somebody else already published SMP */
+-		IOLog("TULIP CPU: cpu %u joined (%u/%u)\n", getCPUNumber(),
+-		    seen, topology->num_cpus);
+ 		return;
+ 	}
+ 
+@@ -471,10 +476,10 @@
+ 	IOService::publishResource(gIOAllCPUInitializedKey, kOSBooleanTrue);
+ 	ml_set_max_cpus(topology->max_cpu_id + 1);
+ 	if (seen < topology->num_cpus) {
+-		IOLog("TULIP CPU: %u of %u CPUs came up; starting SMP with %u\n",
++		kprintf("TULIP CPU: %u of %u CPUs came up; starting SMP with %u\n",
+ 		    seen, topology->num_cpus, seen);
+ 	} else {
+-		IOLog("TULIP CPU: %u CPUs, initialization complete; MHz %u %u %u %u %u %u %u %u\n",
++		kprintf("TULIP CPU: %u CPUs, initialization complete; MHz %u %u %u %u %u %u %u %u\n",
+ 		    topology->num_cpus, gVinceMHz[0], gVinceMHz[1], gVinceMHz[2],
+ 		    gVinceMHz[3], gVinceMHz[4], gVinceMHz[5], gVinceMHz[6],
+ 		    gVinceMHz[7]);
+@@ -497,6 +502,10 @@
+ 	}
+ 	assert(cpu_number() == (int)getCPUNumber());
+ #if defined(VINCE)
++	/* TULIP 0290: proves this core actually reached kernel code. */
++	kprintf("TULIP CPU: cpu %u entered initCPU (mpidr %#llx, boot %u)\n",
++	    getCPUNumber(), __builtin_arm_rsr64("MPIDR_EL1") & 0xffffffULL,
++	    (unsigned int)boot);
+ 	vince_smp_mark(0x31);
+ 	if (getCPUNumber() < 8) {
+ 		gVinceMHz[getCPUNumber()] = vince_cpu_mhz();
+@@ -678,8 +687,14 @@
+ 	/* The reset vector finds this CPU's data by MPIDR (cpu_start set cpu_reset_handler and flushed it). */
+ 	uint64_t entry = ml_static_vtop((vm_offset_t)&LowResetVectorBase);
+ 	int64_t r = vince_psci(PSCI_CPU_ON_64, fPhysId, entry, 0);
++	/*
++	 * TULIP 0290: log unconditionally. This used to print only on failure,
++	 * through IOLog, so a rejected CPU_ON left no trace in the console ring
++	 * and the kernel quietly went uniprocessor.
++	 */
++	kprintf("TULIP CPU: cpu %u PSCI CPU_ON(mpidr %#x, entry %#llx) = %lld\n",
++	    getCPUNumber(), fPhysId, (unsigned long long)entry, (long long)r);
+ 	if (r != 0) {
+-		IOLog("TULIP CPU: PSCI CPU_ON(%#x, %#llx) = %lld\n", fPhysId, entry, r);
+ 		return KERN_FAILURE;
+ 	}
+ 	return KERN_SUCCESS;
