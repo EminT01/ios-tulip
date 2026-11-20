@@ -1,0 +1,122 @@
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -268,6 +268,17 @@
+ 	const OSSymbol *getCPUName(void) APPLE_KEXT_OVERRIDE;
+ };
+ 
++/* TULIP 0293: per-CPU bring-up progress, printed by the eMMC heartbeat (HB5) */
++extern "C" {
++volatile uint32_t tulip_cpu_stage[8];   /* 1 start() ok, 2 waited, 4 named, 8 registered, 0x10 processor_start, 0x20 PSCI, 0x40 running */
++volatile int64_t tulip_cpu_psci[8];
++volatile int32_t tulip_cpu_pres[8];
++volatile uint32_t tulip_cpu_rej;        /* 1 nub lacks logical-cpu-id/reg, 2 phys id mismatch, 4 IOCPU::start failed */
++volatile uint32_t tulip_cpu_topo;
++volatile uint32_t tulip_cpu_calls;
++}
++#define TCS(i, b) do { if ((i) < 8) { tulip_cpu_stage[(i)] |= (b); } } while (0)
++
+ OSDefineMetaClassAndStructors(SweetCPU, IOCPU);
+ 
+ bool
+@@ -277,14 +288,19 @@
+ 	OSNumber *logical = OSDynamicCast(OSNumber, provider->getProperty("logical-cpu-id"));
+ 	OSData *reg = OSDynamicCast(OSData, provider->getProperty("reg"));
+ 
++	tulip_cpu_topo = topology->num_cpus;
++	tulip_cpu_calls++;
+ 	if (logical == NULL || reg == NULL || reg->getLength() != sizeof(uint32_t) ||
+ 	    logical->unsigned32BitValue() >= topology->num_cpus) {
++		tulip_cpu_rej |= 1;
+ 		return false;
+ 	}
+ 	const ml_topology_cpu_t *cpu = &topology->cpus[logical->unsigned32BitValue()];
+ 	if (*(const uint32_t *)reg->getBytesNoCopy() != cpu->phys_id) {
++		tulip_cpu_rej |= 2;
+ 		return false;
+ 	}
++	TCS(cpu->cpu_id, 1);
+ 	bool boot = cpu == topology->boot_cpu;
+ #if !defined(VINCE)
+ 	if (!boot) {
+@@ -316,6 +332,7 @@
+ 	}
+ 	fPhysId = cpu->phys_id;
+ 	fBoot = boot;
++	TCS(cpu->cpu_id, 2);
+ 	/*
+ 	 * The CPU nubs match in parallel threads; measured with all six at once: two CPUs never got past the reset
+ 	 * vector's marks and the system stopped early in boot. Serialize the secondaries.
+@@ -345,6 +362,7 @@
+ 		return false;
+ 	}
+ 	setCPUNumber(cpu->cpu_id);
++	TCS(cpu->cpu_id, 4);
+ 
+ 	ml_processor_info_t info = {};
+ 	info.cpu_id = reinterpret_cast<cpu_id_t>(this);
+@@ -364,6 +382,7 @@
+ 	if (pmi_handler != NULL) {
+ 		panic("TULIP CPU: PMI routing is not implemented");
+ 	}
++	TCS(cpu->cpu_id, 8);
+ 
+ #if defined(VINCE) && !defined(VINCE_TULIP)
+ 	if (boot) {
+@@ -390,6 +409,10 @@
+ 	 * (PSCI CPU_ON); the CPU then runs initCPU(true) itself.
+ 	 */
+ 	result = processor_start(machProcessor);
++	TCS(cpu->cpu_id, 0x10);
++	if (cpu->cpu_id < 8) {
++		tulip_cpu_pres[cpu->cpu_id] = (int32_t)result;
++	}
+ #if defined(VINCE)
+ 	if (!boot) {
+ 		uint64_t deadline;
+@@ -400,6 +423,9 @@
+ 		IOLog("TULIP CPU: cpu %u (MPIDR %#x) %s\n", cpu->cpu_id, fPhysId,
+ 		    result != KERN_SUCCESS ? "not started" :
+ 		    getCPUState() == kIOCPUStateRunning ? "running" : "did not come up within 1 s");
++		if (getCPUState() == kIOCPUStateRunning) {
++			TCS(cpu->cpu_id, 0x40);
++		}
+ 		os_atomic_store(&gVinceStartBusy, 0, release);
+ 		registerService();
+ 		finishStart(topology);
+@@ -685,6 +711,11 @@
+ 	/* The reset vector finds this CPU's data by MPIDR (cpu_start set cpu_reset_handler and flushed it). */
+ 	uint64_t entry = ml_static_vtop((vm_offset_t)&LowResetVectorBase);
+ 	int64_t r = vince_psci(PSCI_CPU_ON_64, fPhysId, entry, 0);
++	/* TULIP 0293: record what the firmware said, per logical CPU. */
++	if (getCPUNumber() >= 0 && getCPUNumber() < 8) {
++		tulip_cpu_psci[getCPUNumber()] = r;
++		tulip_cpu_stage[getCPUNumber()] |= 0x20;
++	}
+ 	/*
+ 	 * TULIP 0290: log unconditionally. This used to print only on failure,
+ 	 * through IOLog, so a rejected CPU_ON left no trace in the console ring
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -4813,6 +4813,22 @@
+ 				    (unsigned long long)tulip_irq_timer, (unsigned long long)tulip_irq_ipi,
+ 				    (unsigned long long)tulip_irq_other, tulip_irq_lastother,
+ 				    (unsigned long long)tulip_irq_spur);
++			{
++				extern volatile uint32_t tulip_cpu_stage[8], tulip_cpu_rej, tulip_cpu_topo, tulip_cpu_calls;
++				extern volatile int64_t tulip_cpu_psci[8];
++				extern volatile int32_t tulip_cpu_pres[8];
++				extern unsigned int processor_avail_count, processor_count;
++
++				printf("TULIP HB5: cpus topo %u calls %u rej 0x%x procs %u/%u stage %x %x %x %x %x %x %x %x "
++				    "psci %d %d %d %d %d %d %d %d pres %d %d %d %d %d %d %d %d\n",
++				    tulip_cpu_topo, tulip_cpu_calls, tulip_cpu_rej, processor_avail_count, processor_count,
++				    tulip_cpu_stage[0], tulip_cpu_stage[1], tulip_cpu_stage[2], tulip_cpu_stage[3],
++				    tulip_cpu_stage[4], tulip_cpu_stage[5], tulip_cpu_stage[6], tulip_cpu_stage[7],
++				    (int)tulip_cpu_psci[0], (int)tulip_cpu_psci[1], (int)tulip_cpu_psci[2], (int)tulip_cpu_psci[3],
++				    (int)tulip_cpu_psci[4], (int)tulip_cpu_psci[5], (int)tulip_cpu_psci[6], (int)tulip_cpu_psci[7],
++				    tulip_cpu_pres[0], tulip_cpu_pres[1], tulip_cpu_pres[2], tulip_cpu_pres[3],
++				    tulip_cpu_pres[4], tulip_cpu_pres[5], tulip_cpu_pres[6], tulip_cpu_pres[7]);
++			}
+ #if defined(VINCE_TULIP)
+ 				{
+ 					extern volatile uint64_t tulip_soft_ticks;
