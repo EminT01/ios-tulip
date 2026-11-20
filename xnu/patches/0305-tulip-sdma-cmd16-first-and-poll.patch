@@ -1,0 +1,75 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -1357,6 +1357,20 @@
+ 			tulip_data_moved = true;
+ 			return 0;
+ 		}
++		/*
++		 * TULIP 0305: PRESENT_STATE is a second MMIO read on every spin, and
++		 * 0274 showed this core does raise BRR in INT_STATUS 99% of the time.
++		 * Poll the fallback every 4th spin while the wait is still short; if
++		 * the block is late, drop back to every spin so a transfer that really
++		 * relies on the fallback is not delayed.
++		 */
++		if (!slow_logged && (spins & 0x3u) != 0) {
++			spins++;
++			if ((spins & 0x63u) == 0) {
++				delay(1);
++			}
++			continue;
++		}
+ 		ps = hc_rd(SDHCI_PRESENT_STATE);
+ 		if (ps & ps_bit) {
+ 			if (!tulip_pstate_buf_logged) {
+@@ -1380,7 +1394,15 @@
+ 			sdhci_data_failure(what, st);
+ 			return ETIMEDOUT;
+ 		}
+-		delay(1);
++		/*
++		 * TULIP 0305: a microsecond of busy-wait per spin, once per block of
++		 * a CMD18 read, is a measurable share of the 512-byte transfer time.
++		 * Every 100th spin is enough to keep the rest of the kernel alive and
++		 * leaves the poll rate above a million reads a second.
++		 */
++		if ((spins & 0x63u) == 0) {
++			delay(1);
++		}
+ 	}
+ }
+ 
+@@ -1840,23 +1862,23 @@
+ 		    (cap >> 16) & 0x7u);
+ 	}
+ 
+-	tulip_data_moved = false;
+-	tulip_sdma_active = true;
+-	tulip_sdma_start = (uint32_t)pa;
+-	hc_wr(SDHCI_SDMA_ADDR, (uint32_t)pa);
+-	printf("TULIP SDMA: SDMA_ADDR written 0x%08x, BLOCK_SIZE 0x%04x\n",
+-	    (uint32_t)pa, hc_rd16(SDHCI_BLOCK_SIZE));
+ 	/*
+-	 * TULIP 0303: tell the card the block length before the engine moves
+-	 * anything, the way whyred's 0157 does on the same SDM636 controller.
+-	 * The host-side BLOCK_SIZE register alone is not enough: eMMC answers a
+-	 * data command with the length it was last told, and a mismatch on a DMA
+-	 * transfer is a plausible way to lose the phone inside sdhci_cmd().
++	 * TULIP 0305: send SET_BLOCKLEN before the DMA address is armed, the way
++	 * whyred's 0157 does. 0303 put it after SDMA_ADDR was written and the
++	 * phone stopped exactly there: the engine claims the buffer as soon as
++	 * the transfer mode is set, so any command issued in between races it.
+ 	 */
+ 	(void)sdhci_cmd(16, SDHCI_BLOCK, 0,
+ 	    SDHCI_CMD_RESP_SHORT | SDHCI_CMD_CRC | SDHCI_CMD_INDEX, &tulip_data_r1);
+ 	printf("TULIP SDMA: CMD16 SET_BLOCKLEN(%u) sent, R1 0x%08x\n",
+ 	    SDHCI_BLOCK, tulip_data_r1);
++
++	tulip_data_moved = false;
++	tulip_sdma_active = true;
++	tulip_sdma_start = (uint32_t)pa;
++	hc_wr(SDHCI_SDMA_ADDR, (uint32_t)pa);
++	printf("TULIP SDMA: SDMA_ADDR written 0x%08x, BLOCK_SIZE 0x%04x\n",
++	    (uint32_t)pa, hc_rd16(SDHCI_BLOCK_SIZE));
+ 	sdhci_set_block(count);
+ 	printf("TULIP SDMA: block set: BLOCK_SIZE 0x%04x BLOCK_COUNT 0x%04x "
+ 	    "HOST_CONTROL1 0x%02x\n", hc_rd16(SDHCI_BLOCK_SIZE),
