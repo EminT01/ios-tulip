@@ -1,0 +1,88 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -1355,16 +1355,6 @@
+ 	start = mach_absolute_time();
+ 	hc_wr(SDHCI_TRANSFER_MODE,
+ 	    ((uint32_t)SDHCI_MAKE_CMD(index, flags) << 16) | tr_mode);
+-	/*
+-	 * TULIP 0304: with sdcsdma=1 the log stops at "issuing command" and the
+-	 * next line never appears, so either the write above or the first poll
+-	 * of the loop is where the phone goes. Print the state right after the
+-	 * register pair is written, before the loop reads anything.
+-	 */
+-	printf("TULIP SDMA: mode written (cmd %u mode 0x%x) INT_STATUS "
+-	    "0x%08x PRESENT_STATE 0x%08x\n", index, tr_mode,
+-	    hc_rd(SDHCI_INT_STATUS), hc_rd(SDHCI_PRESENT_STATE));
+-
+ 	nanoseconds_to_absolutetime(CMD_TIMEOUT_NS, &deadline);
+ 	deadline += mach_absolute_time();
+ 	for (;;) {
+@@ -2015,58 +2005,16 @@
+ 		    SDHCI_TRNS_AUTO_CMD12;
+ 	}
+ 
+-	/*
+-	 * TULIP 0301: SDMA reboots the phone somewhere in this function and the
+-	 * console says nothing, so print each step. The reboot has to be pinned
+-	 * to a line: address register, command issue, or the completion wait.
+-	 */
+-	printf("TULIP SDMA: enter idx %u arg %x count %u pa %x mode %x\n",
+-	    index, arg, count, (uint32_t)pa, tr_mode);
+-	{
+-		/*
+-		 * TULIP 0302: TRNS_DMA is one bit for both engines. If this core
+-		 * advertises ADMA2 and the host is put in ADMA mode, the controller
+-		 * fetches a descriptor table from some address that was never
+-		 * written here; that is a plausible way to lose the phone inside
+-		 * sdhci_cmd(). Print what the core claims before the transfer.
+-		 */
+-		uint32_t cap = hc_rd(SDHCI_CAPABILITIES);
+-
+-		printf("TULIP SDMA: CAP 0x%08x SDMA %u ADMA2 %u ADMA2_64 %u "
+-		    "width_mask 0x%x\n", cap,
+-		    (cap & SDHCI_CAP_SDMA) ? 1u : 0u,
+-		    (cap & SDHCI_CAP_ADMA2) ? 1u : 0u,
+-		    (cap & SDHCI_CAP_ADMA2_64) ? 1u : 0u,
+-		    (cap >> 16) & 0x7u);
+-	}
+ 
+-	/*
+-	 * TULIP 0305: send SET_BLOCKLEN before the DMA address is armed, the way
+-	 * whyred's 0157 does. 0303 put it after SDMA_ADDR was written and the
+-	 * phone stopped exactly there: the engine claims the buffer as soon as
+-	 * the transfer mode is set, so any command issued in between races it.
+-	 */
+-	(void)sdhci_cmd(16, SDHCI_BLOCK, 0,
+-	    SDHCI_CMD_RESP_SHORT | SDHCI_CMD_CRC | SDHCI_CMD_INDEX, &tulip_data_r1);
+-	printf("TULIP SDMA: CMD16 SET_BLOCKLEN(%u) sent, R1 0x%08x\n",
+-	    SDHCI_BLOCK, tulip_data_r1);
+ 
+ 	tulip_data_moved = false;
+ 	tulip_sdma_active = true;
+ 	tulip_sdma_start = (uint32_t)pa;
+ 	hc_wr(SDHCI_SDMA_ADDR, (uint32_t)pa);
+-	printf("TULIP SDMA: SDMA_ADDR written 0x%08x, BLOCK_SIZE 0x%04x\n",
+-	    (uint32_t)pa, hc_rd16(SDHCI_BLOCK_SIZE));
+ 	sdhci_set_block(count);
+-	printf("TULIP SDMA: block set: BLOCK_SIZE 0x%04x BLOCK_COUNT 0x%04x "
+-	    "HOST_CONTROL1 0x%02x\n", hc_rd16(SDHCI_BLOCK_SIZE),
+-	    hc_rd16(SDHCI_BLOCK_COUNT), hc_rd8(SDHCI_HOST_CONTROL));
+-	printf("TULIP SDMA: issuing command\n");
+ 	error = sdhci_cmd(index, arg, tr_mode,
+ 	    SDHCI_CMD_RESP_SHORT | SDHCI_CMD_CRC | SDHCI_CMD_INDEX |
+ 	    SDHCI_CMD_DATA, &tulip_data_r1);
+-	printf("TULIP SDMA: cmd done, error %d, INT_STATUS 0x%08x\n",
+-	    error, hc_rd(SDHCI_INT_STATUS));
+ 	if (error) {
+ 		tulip_sdma_active = false;
+ 		sdhci_recover(index == 18);
+@@ -2075,9 +2023,6 @@
+ 	/* SDMA: only the engine's own state proves the burst landed. */
+ 	error = sdhci_wait_transfer_complete("SDMA block", false,
+ 	    index == 18);
+-	printf("TULIP SDMA: wait done, error %d, INT_STATUS 0x%08x "
+-	    "ADDR 0x%08x\n", error, hc_rd(SDHCI_INT_STATUS),
+-	    hc_rd(SDHCI_SDMA_ADDR));
+ 	tulip_sdma_active = false;
+ 	if (error) {
+ 		sdhci_recover(index == 18);
