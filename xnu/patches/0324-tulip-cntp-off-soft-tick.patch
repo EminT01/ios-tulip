@@ -1,0 +1,112 @@
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -2008,66 +2008,64 @@
+ 		tulip_irq_timer++;
+ 		tulip_irq_timer_cpu[cpu_number() & 7]++;
+ 		if (intid == 30) {
+ 			tulip_irq_cntp++;
+ 		}
+ 		sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_TIMER);
+ 		cdp->cpu_decrementer = -1; /* Large */
+ 		INTERRUPT_MASKED_DEBUG_START(rtclock_intr, DBG_INTR_TYPE_TIMER);
++		/*
++		 * TULIP 0324: this core cannot use the physical timer as its clock.
++		 *
++		 * 0284 pointed PPI 30 at rtclock_intr() because CNTV never arrives
++		 * here. Two attempts to make that work properly (0316 copying XNU's
++		 * CNTV_CVAL into CNTP_CVAL, 0320 taking the next period ourselves
++		 * when the value was stale) both left HB8 showing cntv and cntp the
++		 * same 120504 ticks in the past while pop-cnt equalled that number,
++		 * and spread the storm from one Gold core to five.
++		 *
++		 * So stop pretending. Mask CNTP after acking the interrupt, do no
++		 * work for it, and let 0286's software tick in cpu_idle() be the
++		 * clock again: that is the configuration that booted SpringBoard
++		 * with no storm at all.
++		 *
++		 * rtclock_intr() is deliberately not called for intid 30: the soft
++		 * tick already does it from cpu_idle(), and calling it twice is what
++		 * pushed the timer queue ahead of the counters in the first place.
++		 */
+ 		if (intid == 30) {
+-			/* mask it first: the handler below must not be re-entered */
++			__builtin_arm_wsr64("ICC_EOIR1_EL1", iar);
++			__builtin_arm_isb(ISB_SY);
+ 			__builtin_arm_wsr64("CNTP_CTL_EL0", 2);
+-		}
+-		rtclock_intr(TRUE);
+-		INTERRUPT_MASKED_DEBUG_END();
+-		if (intid == 30) {
+-			uint64_t vctl, vcv, vnow, pnow, frq;
++			if (tulip_irq_timer_cpu[cpu_number() & 7] == 200000 &&
++			    !tulip_storm_set) {
++				uint64_t vctl, vcv, vct, frq;
+ 
+-			/*
+-			 * TULIP 0320: HB8 caught the storm with both counters already
+-			 * overdue - cntv cval-cnt -73621 and cntp cval-cnt -73621, the
+-			 * same value - while CNTFRQ is 19.2 MHz, so the deadline was
+-			 * 3.8 ms in the past and every re-arm fired again immediately.
+-			 * pop-cnt had reached 73621 but nothing moved the deadline
+-			 * forward, which is why one core took 392 million interrupts.
+-			 *
+-			 * 0316 copied whatever rtclock_intr() left in CNTV_CVAL into
+-			 * CNTP_CVAL. That is still the right thing when XNU programmed a
+-			 * real deadline, but it cannot help when the value it leaves is
+-			 * already in the past: copying a stale deadline forwards the
+-			 * problem instead of fixing it.
+-			 *
+-			 * So: take XNU's value when it is in the future, otherwise set
+-			 * the next tick one period ahead ourselves and push the same
+-			 * point back into both timers. The tick then advances at 100 Hz
+-			 * no matter what rtclock_intr() left behind.
+-			 */
+-			__asm__ volatile ("mrs %0, cntv_ctl_el0" : "=r"(vctl));
+-			__asm__ volatile ("mrs %0, cntv_cval_el0" : "=r"(vcv));
+-			__asm__ volatile ("mrs %0, cntvct_el0" : "=r"(vnow));
+-			__asm__ volatile ("mrs %0, cntfrq_el0" : "=r"(frq));
+-			(void)vctl;
+-			if (frq == 0) {
+-				frq = 19200000;
+-			}
+-			if (vcv <= vnow) {
+-				/* XNU left it in the past: take the next tick ourselves */
+-				vcv = vnow + frq / 100;
+-				__builtin_arm_wsr64("CNTV_CVAL_EL0", vcv);
+-				__builtin_arm_wsr64("CNTV_CTL_EL0", 1);
+-			}
+-			/* one counter, two timers: arm the physical PPI at the same point */
+-			__asm__ volatile ("mrs %0, cntpct_el0" : "=r"(pnow));
+-			if (vcv <= pnow) {
+-				vcv = pnow + frq / 100;
++				__asm__ volatile ("mrs %0, cntv_ctl_el0" : "=r"(vctl));
++				__asm__ volatile ("mrs %0, cntv_cval_el0" : "=r"(vcv));
++				__asm__ volatile ("mrs %0, cntvct_el0" : "=r"(vct));
++				__asm__ volatile ("mrs %0, cntfrq_el0" : "=r"(frq));
++				tulip_storm[0] = cpu_number();
++				tulip_storm[1] = intid;
++				tulip_storm[2] = vctl;
++				tulip_storm[3] = vcv - vct;
++				tulip_storm[4] = 2;
++				tulip_storm[5] = 0;
++				tulip_storm[6] = frq;
++				tulip_storm[7] = cdp->rtcPop - vct;
++				tulip_storm[8] = cdp->cpu_idle_pop;
++				tulip_storm[9] = tulip_irq_cntp;
++				tulip_storm_set = 1;
+ 			}
+-			__builtin_arm_wsr64("CNTP_CVAL_EL0", vcv);
+-			__builtin_arm_wsr64("CNTP_CTL_EL0", 1);
++			__builtin_arm_isb(ISB_SY);
++			return;
+ 		}
++		rtclock_intr(TRUE);
++		INTERRUPT_MASKED_DEBUG_END();
+ 		if (tulip_irq_timer_cpu[cpu_number() & 7] == 200000 && !tulip_storm_set) {
+ 			uint64_t vct, vctl, vcv, pctl, pcv, frq;
+ 
+ 			__asm__ volatile ("mrs %0, cntvct_el0" : "=r"(vct));
+ 			__asm__ volatile ("mrs %0, cntv_ctl_el0" : "=r"(vctl));
+ 			__asm__ volatile ("mrs %0, cntv_cval_el0" : "=r"(vcv));
+ 			__asm__ volatile ("mrs %0, cntp_ctl_el0" : "=r"(pctl));
+ 			__asm__ volatile ("mrs %0, cntp_cval_el0" : "=r"(pcv));
