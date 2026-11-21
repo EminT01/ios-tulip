@@ -1,0 +1,192 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -398,6 +398,18 @@
+ 	return ok ? 0 : -1;
+ }
+ 
++/*
++ * TULIP 0313: the NT36xxx answers on TWO I2C addresses (stock nt36xxx.c):
++ * 0x62 takes the hardware commands (0x69 boot reset, 0xA5 idle, 0x35), and
++ * 0x01 is the firmware/bootloader address that takes the { 0xFF, page } index
++ * write and every register read. 0280 used 0x62 for both, so it could not read
++ * anything. The sequence below follows the stock probe; decoded fingers go to
++ * sweet_hid_touch() in panel pixels.
++ */
++extern void sweet_hid_touch(int finger, int down, int x, int y);
++
++static uint32_t tt_ev_page;
++
+ static int
+ tt_nvt_read(uint32_t addr, uint8_t *buf, int n)
+ {
+@@ -406,14 +418,24 @@
+ 	pg[0] = 0xff;
+ 	pg[1] = (uint8_t)(addr >> 16);
+ 	pg[2] = (uint8_t)(addr >> 8);
+-	if (tt_write(0x62, pg, 3) != 0) {
++	if (tt_write(0x01, pg, 3) != 0) {
+ 		return -3;
+ 	}
+-	return tt_read(0x62, (uint8_t)(addr & 0xff), buf, n);
++	return tt_read(0x01, (uint8_t)(addr & 0xff), buf, n);
++}
++
++static void
++tt_nvt_cmd(uint8_t cmd)
++{
++	uint8_t c[2];
++
++	c[0] = 0x00;
++	c[1] = cmd;
++	(void)tt_write(0x62, c, 2);
+ }
+ 
+ static const uint32_t tt_nvt_pages[] = {
+-	0x11e00, 0x21c00, 0x11a00, 0x22d00, 0x2fe00, 0x21000
++	0x11e00, 0x11c00, 0x21c00, 0x11a00, 0x22d00, 0x2fe00, 0x21000
+ };
+ 
+ void tulip_touch_poll(void);
+@@ -421,11 +443,13 @@
+ tulip_touch_poll(void)
+ {
+ 	static uint64_t next_ns;
+-	static uint8_t last[6][8];
++	static uint8_t last[8][8];
++	static uint32_t down_mask;
++	static int px[10], py[10];
+ 	uint64_t ns = 0;
+-	uint8_t b[8];
++	uint8_t b[72];
+ 	size_t i;
+-	int muted;
++	int muted, k;
+ 
+ 	if (!tt_ready) {
+ 		return;
+@@ -434,8 +458,53 @@
+ 	if (ns < next_ns) {
+ 		return;
+ 	}
++	if (tt_ev_page) {
++		uint32_t mask = 0;
++		int x[10] = {0}, y[10] = {0};
++
++		next_ns = ns + 15000000ULL;
++		if (tt_nvt_read(tt_ev_page, b, 65) != 0) {
++			return;
++		}
++		for (k = 0; k < 10; k++) {
++			const uint8_t *p = &b[6 * k];
++			int id = p[0] >> 3, st = p[0] & 7;
++
++			if (id < 1 || id > 10 || (st != 1 && st != 2)) {
++				continue;
++			}
++			x[id - 1] = (p[1] << 4) | (p[3] >> 4);
++			y[id - 1] = (p[2] << 4) | (p[3] & 0x0f);
++			mask |= 1u << (id - 1);
++		}
++		for (k = 0; k < 10; k++) {
++			if (mask & (1u << k)) {
++				if (!(down_mask & (1u << k)) || x[k] != px[k] || y[k] != py[k]) {
++					sweet_hid_touch(k, 1, x[k], y[k]);
++					if (tt_nvt_lines++ < 300) {
++						muted = sweet_console_muted;
++						sweet_console_muted = 0;
++						printf("TULIP NVT: finger %d down x %d y %d\n", k, x[k], y[k]);
++						sweet_console_muted = muted;
++					}
++				}
++				px[k] = x[k];
++				py[k] = y[k];
++			} else if (down_mask & (1u << k)) {
++				sweet_hid_touch(k, 0, px[k], py[k]);
++				if (tt_nvt_lines++ < 300) {
++					muted = sweet_console_muted;
++					sweet_console_muted = 0;
++					printf("TULIP NVT: finger %d up\n", k);
++					sweet_console_muted = muted;
++				}
++			}
++		}
++		down_mask = mask;
++		return;
++	}
+ 	next_ns = ns + 300000000ULL;
+-	for (i = 0; i < sizeof(tt_nvt_pages) / sizeof(tt_nvt_pages[0]); i++) {
++	for (i = 0; i < sizeof(tt_nvt_pages) / sizeof(tt_nvt_pages[0]) && i < 8; i++) {
+ 		if (tt_nvt_read(tt_nvt_pages[i], b, 8) != 0) {
+ 			continue;
+ 		}
+@@ -455,8 +524,9 @@
+ static void
+ tulip_touch_nvt_thread(void *arg, wait_result_t w)
+ {
+-	uint8_t b[8];
+-	int muted, a, rc, found = 0;
++	uint8_t b[72];
++	int muted, a, rc, found = 0, n, got = 0;
++	size_t i;
+ 
+ 	(void)arg; (void)w;
+ 	tt_spin = 1;
+@@ -475,7 +545,7 @@
+ 	tulip_udelay(300000);
+ 	tt_sda(1); tt_scl(1);
+ 	printf("TULIP NVT: setup, idle SDA %d SCL %d irq %d\n", tt_get(2), tt_get(3), tt_get(67));
+-	for (a = 0x08; a < 0x78; a++) {
++	for (a = 0x01; a < 0x78; a++) {
+ 		tt_start();
+ 		rc = tt_wbyte((uint8_t)(a << 1));
+ 		tt_stop();
+@@ -484,13 +554,42 @@
+ 			found++;
+ 		}
+ 	}
+-	/* chip trim id lives at 0x1f64e on the NT36xxx family */
+-	rc = tt_nvt_read(0x1f64e, b, 6);
+-	printf("TULIP NVT: chip id rc %d  %02x %02x %02x %02x %02x %02x\n", rc,
+-	    b[0], b[1], b[2], b[3], b[4], b[5]);
+-	rc = tt_nvt_read(0x11e00, b, 8);
+-	printf("TULIP NVT: page 0x11e00 rc %d  %02x %02x %02x %02x %02x %02x %02x %02x\n", rc,
+-	    b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
++	/* stock probe: boot reset, then idle + 0x35 + read the trim id at 0x1f64e */
++	tt_nvt_cmd(0x69);
++	tulip_udelay(35000);
++	for (n = 0; n < 5; n++) {
++		tt_nvt_cmd(0xA5);
++		tulip_udelay(15000);
++		tt_nvt_cmd(0x35);
++		tulip_udelay(10000);
++		rc = tt_nvt_read(0x1f64e, b, 6);
++		printf("TULIP NVT: chip id try %d rc %d  %02x %02x %02x %02x %02x %02x\n", n, rc,
++		    b[0], b[1], b[2], b[3], b[4], b[5]);
++		if (rc == 0 && b[3] == 0x72 && b[4] == 0x66) {
++			break;	/* NT36672A, as in the Android log: 0a 00 00 72 66 03 */
++		}
++	}
++	/* let the firmware run, then wait for reset-complete (>= 0xA0) at event page + 0x60 */
++	tt_nvt_cmd(0x69);
++	tulip_udelay(35000);
++	for (n = 0; n < 100 && !got; n++) {
++		tulip_udelay(10000);
++		for (i = 0; i < sizeof(tt_nvt_pages) / sizeof(tt_nvt_pages[0]); i++) {
++			if (tt_nvt_read(tt_nvt_pages[i] + 0x60, b, 6) == 0 && b[1] >= 0xa0 && b[1] <= 0xaf) {
++				tt_ev_page = tt_nvt_pages[i];
++				got = 1;
++				break;
++			}
++		}
++	}
++	if (got) {
++		rc = tt_nvt_read(tt_ev_page + 0x78, b, 16);
++		printf("TULIP NVT: event page 0x%05x reset state %02x; fwinfo rc %d fw %02x/%02x x_num %u y_num %u "
++		    "max x %u y %u\n", tt_ev_page, b[0], rc, b[0], b[1], b[2], b[3],
++		    (b[4] << 8) | b[5], (b[6] << 8) | b[7]);
++	} else {
++		printf("TULIP NVT: no event page showed a reset state, scanning pages for changes\n");
++	}
+ 	sweet_console_muted = muted;
+ 	tt_ready = (found > 0);
+ }
