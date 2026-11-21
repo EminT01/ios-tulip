@@ -1,6 +1,6 @@
 --- a/bsd/dev/tulip_sdhci.c
 +++ b/bsd/dev/tulip_sdhci.c
-@@ -5414,25 +5414,91 @@
+@@ -5883,26 +5883,92 @@
  /*
   * The 1 MiB bounce buffer lives in the kernel image. kmem_alloc_contig() of
   * this size never returns at this point of bsd_init on the 4 KiB tulip
@@ -18,7 +18,7 @@
 + * directly gives the cores the frequency and leaves the voltage where LK put
 + * it - the same rails Android runs at 2.45 GHz on this exact part.
 + *
-+ * sdm660.dtsi, qcom,perfcl-speedbin0-v0 / qcom,pwrcl-speedbin0-v0:
++ * sdm660.dtsi, qcom,pwrcl-speedbin0-v0 / qcom,perfcl-speedbin0-v0:
 + *   pwrcl (Silver A53): 300M..1843.2M, L 0x0f..0x60
 + *   perfcl (Gold A73):  300M..2457.6M, L 0x0f..0x80
 + *
@@ -79,6 +79,7 @@
  	unsigned int size = 0;
  	int error, rw = 0;
  	const char *stage = "init";
+ 	uint64_t bounce_bytes;
  
 +	/* TULIP 0317: raise the cluster PLLs before anything else runs, so the
 +	 * whole boot - not just the part after the first heartbeat - is fast. */
