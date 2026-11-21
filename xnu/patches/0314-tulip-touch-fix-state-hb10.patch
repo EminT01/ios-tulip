@@ -1,0 +1,116 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -410,6 +410,14 @@
+ 
+ static uint32_t tt_ev_page;
+ 
++/*
++ * 0314 diagnostics for the HB10 heartbeat line: [0] ACKing addresses, [1] chip id
++ * bytes 3,4, [2] chip read rc, [3] event page, [4] reset state byte, [6]/[7] max x/y,
++ * [8] polls, [9] failed polls, [10] finger-down events, [11]/[12] last x/y,
++ * [13] setup stage, [14] ACK flags (1 = 0x01, 2 = 0x62), [15] irq pin.
++ */
++volatile uint32_t tulip_nvt[16];
++
+ static int
+ tt_nvt_read(uint32_t addr, uint8_t *buf, int n)
+ {
+@@ -463,7 +471,10 @@
+ 		int x[10] = {0}, y[10] = {0};
+ 
+ 		next_ns = ns + 15000000ULL;
++		tulip_nvt[8]++;
++		tulip_nvt[15] = (uint32_t)tt_get(67);
+ 		if (tt_nvt_read(tt_ev_page, b, 65) != 0) {
++			tulip_nvt[9]++;
+ 			return;
+ 		}
+ 		for (k = 0; k < 10; k++) {
+@@ -481,6 +492,9 @@
+ 			if (mask & (1u << k)) {
+ 				if (!(down_mask & (1u << k)) || x[k] != px[k] || y[k] != py[k]) {
+ 					sweet_hid_touch(k, 1, x[k], y[k]);
++					tulip_nvt[10]++;
++					tulip_nvt[11] = (uint32_t)x[k];
++					tulip_nvt[12] = (uint32_t)y[k];
+ 					if (tt_nvt_lines++ < 300) {
+ 						muted = sweet_console_muted;
+ 						sweet_console_muted = 0;
+@@ -504,6 +518,7 @@
+ 		return;
+ 	}
+ 	next_ns = ns + 300000000ULL;
++	tulip_nvt[8]++;
+ 	for (i = 0; i < sizeof(tt_nvt_pages) / sizeof(tt_nvt_pages[0]) && i < 8; i++) {
+ 		if (tt_nvt_read(tt_nvt_pages[i], b, 8) != 0) {
+ 			continue;
+@@ -552,6 +567,12 @@
+ 		if (rc) {
+ 			printf("TULIP NVT: ACK at 0x%02x\n", a);
+ 			found++;
++			if (a == 0x01) {
++				tulip_nvt[14] |= 1;
++			}
++			if (a == 0x62) {
++				tulip_nvt[14] |= 2;
++			}
+ 		}
+ 	}
+ 	/* stock probe: boot reset, then idle + 0x35 + read the trim id at 0x1f64e */
+@@ -565,6 +586,8 @@
+ 		rc = tt_nvt_read(0x1f64e, b, 6);
+ 		printf("TULIP NVT: chip id try %d rc %d  %02x %02x %02x %02x %02x %02x\n", n, rc,
+ 		    b[0], b[1], b[2], b[3], b[4], b[5]);
++		tulip_nvt[1] = ((uint32_t)b[3] << 8) | b[4];
++		tulip_nvt[2] = (uint32_t)rc;
+ 		if (rc == 0 && b[3] == 0x72 && b[4] == 0x66) {
+ 			break;	/* NT36672A, as in the Android log: 0a 00 00 72 66 03 */
+ 		}
+@@ -575,8 +598,11 @@
+ 	for (n = 0; n < 100 && !got; n++) {
+ 		tulip_udelay(10000);
+ 		for (i = 0; i < sizeof(tt_nvt_pages) / sizeof(tt_nvt_pages[0]); i++) {
+-			if (tt_nvt_read(tt_nvt_pages[i] + 0x60, b, 6) == 0 && b[1] >= 0xa0 && b[1] <= 0xaf) {
++			/* data byte at +0x60 is b[0]: the stock buf[1] is the first byte after the register */
++			if (tt_nvt_read(tt_nvt_pages[i] + 0x60, b, 6) == 0 && b[0] >= 0xa0 && b[0] <= 0xaf) {
+ 				tt_ev_page = tt_nvt_pages[i];
++				tulip_nvt[3] = tt_ev_page;
++				tulip_nvt[4] = b[0];
+ 				got = 1;
+ 				break;
+ 			}
+@@ -585,11 +611,15 @@
+ 	if (got) {
+ 		rc = tt_nvt_read(tt_ev_page + 0x78, b, 16);
+ 		printf("TULIP NVT: event page 0x%05x reset state %02x; fwinfo rc %d fw %02x/%02x x_num %u y_num %u "
+-		    "max x %u y %u\n", tt_ev_page, b[0], rc, b[0], b[1], b[2], b[3],
++		    "max x %u y %u\n", tt_ev_page, (unsigned)tulip_nvt[4], rc, b[0], b[1], b[2], b[3],
+ 		    (b[4] << 8) | b[5], (b[6] << 8) | b[7]);
+ 	} else {
+ 		printf("TULIP NVT: no event page showed a reset state, scanning pages for changes\n");
+ 	}
++	tulip_nvt[0] = (uint32_t)found;
++	tulip_nvt[6] = (b[4] << 8) | b[5];
++	tulip_nvt[7] = (b[6] << 8) | b[7];
++	tulip_nvt[13] = 4;
+ 	sweet_console_muted = muted;
+ 	tt_ready = (found > 0);
+ }
+@@ -5079,6 +5109,17 @@
+ 				}
+ 			}
+ 			{
++				extern volatile uint32_t tulip_nvt[16];
++
++				if (tulip_nvt[13] || tulip_nvt[8]) {
++					printf("TULIP HB10: nvt stage %u ack %u (flags %u) chip %04x rc %d page %05x state %02x "
++					    "max %u,%u polls %u fail %u downs %u last %u,%u irq %u\n", tulip_nvt[13], tulip_nvt[0],
++					    tulip_nvt[14], tulip_nvt[1], (int)tulip_nvt[2], tulip_nvt[3], tulip_nvt[4], tulip_nvt[6],
++					    tulip_nvt[7], tulip_nvt[8], tulip_nvt[9], tulip_nvt[10], tulip_nvt[11], tulip_nvt[12],
++					    tulip_nvt[15]);
++				}
++			}
++			{
+ 				extern volatile uint32_t tulip_cpu_stage[8], tulip_cpu_rej, tulip_cpu_topo, tulip_cpu_calls;
+ 				extern volatile int64_t tulip_cpu_psci[8];
+ 				extern volatile int32_t tulip_cpu_pres[8];
