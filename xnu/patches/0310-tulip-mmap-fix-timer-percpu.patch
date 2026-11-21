@@ -1,0 +1,61 @@
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1849,6 +1849,7 @@
+ 
+ /* TULIP 0279: interrupt counters shown by the TULIP HB2 line */
+ volatile uint64_t tulip_irq_timer, tulip_irq_ipi, tulip_irq_other, tulip_irq_spur;
++volatile uint64_t tulip_irq_timer_cpu[8];   /* TULIP 0310: timer interrupts per CPU (HB7) */
+ /* TULIP 0297: how many times each SGI 0-15 arrived (shown by HB6) */
+ volatile uint32_t tulip_sgi_seen[16];
+ volatile uint32_t tulip_sgi_mask;
+@@ -1991,6 +1992,7 @@
+ 		 * identical; CNTP is re-armed here before the EOI.
+ 		 */
+ 		tulip_irq_timer++;
++		tulip_irq_timer_cpu[cpu_number() & 7]++;
+ 		if (intid == 30) {
+ 			tulip_irq_cntp++;
+ 		}
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -202,6 +202,7 @@
+ 	 * at seven non-zero offsets, to tell a broken file-mapping path from a CoreUI problem.
+ 	 */
+ 	if (code == 197 && error == 0 && uthread->uu_arg[1] >= 0x18000 && uthread->uu_arg[1] <= 0x20000 &&
++	    (int)uthread->uu_arg[4] >= 0 &&
+ 	    strncmp(proc->p_comm, "SpringBoard", MAXCOMLEN) == 0) {
+ 		static int tulip_mm_prints;
+ 
+@@ -211,10 +212,13 @@
+ 			int i;
+ 
+ 			tulip_mm_prints++;
+-			printf("TULIP MMAP: addr %llx len %llx\n", (unsigned long long)uthread->uu_rval[0],
+-			    (unsigned long long)uthread->uu_arg[1]);
++			/* TULIP 0310: mmap returns a 64-bit address spread over uu_rval[0..1]; 0307 used only the low half (EFAULT) */
++			user_addr_t mmaddr = *(user_addr_t *)uthread->uu_rval;
++
++			printf("TULIP MMAP: fd %d addr %llx len %llx\n", (int)uthread->uu_arg[4],
++			    (unsigned long long)mmaddr, (unsigned long long)uthread->uu_arg[1]);
+ 			for (i = 0; i < 7; i++) {
+-				int e = copyin((user_addr_t)(uthread->uu_rval[0] + offs[i]), b, sizeof(b));
++				int e = copyin(mmaddr + offs[i], b, sizeof(b));
+ 				printf("TULIP MMAP: +%x err %d %02x%02x%02x%02x%02x%02x%02x%02x\n", offs[i], e,
+ 				    b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
+ 			}
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -4939,6 +4939,13 @@
+ 				    tulip_sgi_seen[12], tulip_sgi_seen[13], tulip_sgi_seen[14], tulip_sgi_seen[15]);
+ 			}
+ 			{
++				extern volatile uint64_t tulip_irq_timer_cpu[8];
++
++				printf("TULIP HB7: timer irqs per cpu %llu %llu %llu %llu %llu %llu %llu %llu\n",
++				    tulip_irq_timer_cpu[0], tulip_irq_timer_cpu[1], tulip_irq_timer_cpu[2], tulip_irq_timer_cpu[3],
++				    tulip_irq_timer_cpu[4], tulip_irq_timer_cpu[5], tulip_irq_timer_cpu[6], tulip_irq_timer_cpu[7]);
++			}
++			{
+ 				extern volatile uint32_t tulip_cpu_stage[8], tulip_cpu_rej, tulip_cpu_topo, tulip_cpu_calls;
+ 				extern volatile int64_t tulip_cpu_psci[8];
+ 				extern volatile int32_t tulip_cpu_pres[8];
