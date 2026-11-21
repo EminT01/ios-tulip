@@ -1,6 +1,11 @@
 --- a/bsd/dev/tulip_sdhci.c
 +++ b/bsd/dev/tulip_sdhci.c
-@@ -5419,6 +5419,68 @@
+@@ -5414,25 +5414,91 @@
+ /*
+  * The 1 MiB bounce buffer lives in the kernel image. kmem_alloc_contig() of
+  * this size never returns at this point of bsd_init on the 4 KiB tulip
+  * kernel (the last console line is the "GCC sdcc1_apps not mapped" message),
+  * and the kernel's own data segments are physically contiguous anyway.
   */
  static char tulip_sdhci_bounce[BOUNCE_SIZE] __attribute__((aligned(4096)));
  
@@ -69,7 +74,9 @@
  static int
  tulip_sdhci_init(void)
  {
-@@ -5428,6 +5490,10 @@
+ 	DTEntry node;
+ 	uintptr_t const *reg = NULL;
+ 	unsigned int size = 0;
  	int error, rw = 0;
  	const char *stage = "init";
  
@@ -80,3 +87,8 @@
  	if (SecureDTLookupEntry(NULL, "/tulip-sdhci", &node) != kSuccess ||
  	    SecureDTGetProperty(node, "reg", (void const **)&reg, &size) != kSuccess ||
  	    size < 2 * sizeof(uintptr_t)) {
+ 		printf("TULIP SDHCI: no /tulip-sdhci node in the device tree\n");
+ 		return ENXIO;
+ 	}
+ 	if (reg[1] < 0x1000) {
+ 		printf("TULIP SDHCI: /tulip-sdhci reg window too small "
