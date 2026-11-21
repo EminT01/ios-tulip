@@ -1,0 +1,108 @@
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1849,6 +1849,8 @@
+ 
+ /* TULIP 0279: interrupt counters shown by the TULIP HB2 line */
+ volatile uint64_t tulip_irq_timer, tulip_irq_ipi, tulip_irq_other, tulip_irq_spur;
++volatile uint64_t tulip_storm[10];   /* TULIP 0311: timer state captured on the first CPU to reach 200000 timer irqs */
++volatile int tulip_storm_set;
+ volatile uint64_t tulip_irq_timer_cpu[8];   /* TULIP 0310: timer interrupts per CPU (HB7) */
+ /* TULIP 0297: how many times each SGI 0-15 arrived (shown by HB6) */
+ volatile uint32_t tulip_sgi_seen[16];
+@@ -2010,6 +2012,27 @@
+ 		}
+ 		rtclock_intr(TRUE);
+ 		INTERRUPT_MASKED_DEBUG_END();
++		if (tulip_irq_timer_cpu[cpu_number() & 7] == 200000 && !tulip_storm_set) {
++			uint64_t vct, vctl, vcv, pctl, pcv, frq;
++
++			__asm__ volatile ("mrs %0, cntvct_el0" : "=r"(vct));
++			__asm__ volatile ("mrs %0, cntv_ctl_el0" : "=r"(vctl));
++			__asm__ volatile ("mrs %0, cntv_cval_el0" : "=r"(vcv));
++			__asm__ volatile ("mrs %0, cntp_ctl_el0" : "=r"(pctl));
++			__asm__ volatile ("mrs %0, cntp_cval_el0" : "=r"(pcv));
++			__asm__ volatile ("mrs %0, cntfrq_el0" : "=r"(frq));
++			tulip_storm[0] = cpu_number();
++			tulip_storm[1] = intid;
++			tulip_storm[2] = vctl;
++			tulip_storm[3] = vcv - vct;
++			tulip_storm[4] = pctl;
++			tulip_storm[5] = pcv - vct;
++			tulip_storm[6] = frq;
++			tulip_storm[7] = cdp->rtcPop - vct;
++			tulip_storm[8] = cdp->cpu_idle_pop;
++			tulip_storm[9] = tulip_irq_cntp;
++			tulip_storm_set = 1;
++		}
+ 		__builtin_arm_wsr64("ICC_EOIR1_EL1", iar);
+ 	} else if (intid < 16) {
+ 		tulip_irq_ipi++;
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -46,6 +46,7 @@
+ 
+ #if defined(ARM64_BOARD_CONFIG_VINCE)
+ extern int vince_trace_on;
++extern volatile int tulip_bp_fd, tulip_bp_pid;
+ extern void vince_sc_trace(const char *comm, int code, uint64_t *arg, int error, int ret, int exit_entry, uint64_t pc,
+     uint64_t lr, uint64_t fp);
+ #endif
+@@ -201,13 +202,12 @@
+ 	 * Read back what the mapping really contains (this also forces the page-in) and print 8 bytes
+ 	 * at seven non-zero offsets, to tell a broken file-mapping path from a CoreUI problem.
+ 	 */
+-	if (code == 197 && error == 0 && uthread->uu_arg[1] >= 0x18000 && uthread->uu_arg[1] <= 0x20000 &&
+-	    (int)uthread->uu_arg[4] >= 0 &&
+-	    strncmp(proc->p_comm, "SpringBoard", MAXCOMLEN) == 0) {
++	if (code == 197 && error == 0 && (int)uthread->uu_arg[4] == tulip_bp_fd && tulip_bp_fd >= 0 &&
++	    proc_getpid(proc) == tulip_bp_pid) {
+ 		static int tulip_mm_prints;
+ 
+ 		if (tulip_mm_prints < 6) {
+-			static const uint32_t offs[7] = { 0, 0x3000, 0x6000, 0x8000, 0xc000, 0x14000, 0x19000 };
++			static const uint32_t offs[7] = { 0, 0x3000, 0x6000, 0x8000, 0xc000, 0x14000, 0x19000 };   /* expected for the v2 car: 424f4d53746f7265 748001a30b0c1d55 4953544301000000 1e0029841e000000 65436f756e745577 735c736b69705265 2900000000002a00 */
+ 			uint8_t b[8];
+ 			int i;
+ 
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -4946,6 +4946,15 @@
+ 				    tulip_irq_timer_cpu[4], tulip_irq_timer_cpu[5], tulip_irq_timer_cpu[6], tulip_irq_timer_cpu[7]);
+ 			}
+ 			{
++				extern volatile uint64_t tulip_storm[10];
++				extern volatile int tulip_storm_set;
++
++				printf("TULIP HB8: storm %d cpu %llu intid %llu cntv ctl %llx cval-ct %lld cntp ctl %llx cval-ct %lld "
++				    "frq %llu pop-ct %lld idlepop %llx cntp-total %llu\n", tulip_storm_set,
++				    tulip_storm[0], tulip_storm[1], tulip_storm[2], (long long)tulip_storm[3], tulip_storm[4],
++				    (long long)tulip_storm[5], tulip_storm[6], (long long)tulip_storm[7], tulip_storm[8], tulip_storm[9]);
++			}
++			{
+ 				extern volatile uint32_t tulip_cpu_stage[8], tulip_cpu_rej, tulip_cpu_topo, tulip_cpu_calls;
+ 				extern volatile int64_t tulip_cpu_psci[8];
+ 				extern volatile int32_t tulip_cpu_pres[8];
+--- a/bsd/vfs/vfs_syscalls.c
++++ b/bsd/vfs/vfs_syscalls.c
+@@ -4555,6 +4555,10 @@
+  *
+  * XXX Need to implement uid, gid
+  */
++/* TULIP 0311: fd/pid of the BoundingPath Assets.car open, so systemcalls.c can inspect exactly that mapping */
++volatile int tulip_bp_fd = -1;
++volatile int tulip_bp_pid;
++
+ int
+ open1(vfs_context_t ctx, struct nameidata *ndp, int uflags,
+     struct vnode_attr *vap, fp_initfn_t fp_init, void *initarg, int32_t *retval, int authfd)
+@@ -4648,6 +4652,10 @@
+ 	error = vn_open_auth(ndp, &flags, vap, authvp);
+ 	if (tulip_bpm) {
+ 		printf("TULIP OPEN2: pid %d '%s' -> %d\n", proc_getpid(p), tulip_bp, error);
++		if (error == 0 && strnstr(tulip_bp, "Assets.car", sizeof(tulip_bp)) != NULL) {
++			tulip_bp_pid = proc_getpid(p);
++			tulip_bp_fd = indx;
++		}
+ 	}
+ 	if (error) {
+ 		if (authvp != NULLVP) {
