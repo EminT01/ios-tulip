@@ -1,0 +1,82 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -5419,6 +5419,68 @@
+  */
+ static char tulip_sdhci_bounce[BOUNCE_SIZE] __attribute__((aligned(4096)));
+ 
++/*
++ * TULIP 0317: bring both cluster PLLs up to the top of their OPP table.
++ *
++ * clk_osm_setup_cluster_pll() on this SoC only writes four registers on the
++ * PLL block; the OSM around it exists for DVFS (regulator framework plus the
++ * efuse speedbin), neither of which this kernel has. Programming the PLL
++ * directly gives the cores the frequency and leaves the voltage where LK put
++ * it - the same rails Android runs at 2.45 GHz on this exact part.
++ *
++ * sdm660.dtsi, qcom,perfcl-speedbin0-v0 / qcom,pwrcl-speedbin0-v0:
++ *   pwrcl (Silver A53): 300M..1843.2M, L 0x0f..0x60
++ *   perfcl (Gold A73):  300M..2457.6M, L 0x0f..0x80
++ *
++ * HB9 on tulip showed Silver L 0x30 and Gold L 0x14 - about 600 MHz on the
++ * Gold cluster - so this is a large step up, not a tweak.
++ *
++ * Opt-in with tulipmhz=1; without it both PLLs are left exactly as LK set them.
++ */
++static void
++tulip_cpu_pll_up(void)
++{
++	uint32_t on = 0;
++	volatile uint32_t *ps, *pg;
++	volatile uint32_t *pll[2];
++	uint32_t lval[2];
++	const char *pname[2];
++	int k;
++
++	if (!PE_parse_boot_argn("tulipmhz", &on, sizeof(on)) || on != 1) {
++		return;
++	}
++	ps = (volatile uint32_t *)ml_io_map(0x17916000, 0x1000);
++	pg = (volatile uint32_t *)ml_io_map(0x17816000, 0x1000);
++	if (!ps || !pg) {
++		printf("TULIP MHZSET: PLL map failed\n");
++		return;
++	}
++	pll[0] = ps; lval[0] = 0x60; pname[0] = "silver 1843.2";
++	pll[1] = pg; lval[1] = 0x80; pname[1] = "gold 2457.6";
++	for (k = 0; k < 2; k++) {
++		uint32_t before = pll[k][1];
++
++		/* clk_osm_setup_cluster_pll() order: standby, L, user, cfg, reset,
++		 * enable, lock detect. */
++		pll[k][0] = 0x0;                /* PLL_MODE standby */
++		pll[k][1] = lval[k];            /* PLL_L_VAL */
++		pll[k][3] = 0x01000008;         /* PLL_USER_CTRL */
++		pll[k][4] = 0x20004AA8;         /* PLL_CONFIG_CTL_LO */
++		pll[k][0] = 0x2;                /* reset */
++		__builtin_arm_dsb(0xf);
++		delay(1);
++		pll[k][0] = 0x6;                /* enable */
++		__builtin_arm_dsb(0xf);
++		delay(1);
++		pll[k][0] = 0x7;                /* lock detect */
++		__builtin_arm_dsb(0xf);
++		printf("TULIP MHZSET: %s L 0x%02x -> 0x%02x, PLL_MODE 0x%x "
++		    "STATUS 0x%x\n", pname[k], before, pll[k][1],
++		    pll[k][0], pll[k][0xb / 4]);
++	}
++}
++
+ static int
+ tulip_sdhci_init(void)
+ {
+@@ -5428,6 +5490,10 @@
+ 	int error, rw = 0;
+ 	const char *stage = "init";
+ 
++	/* TULIP 0317: raise the cluster PLLs before anything else runs, so the
++	 * whole boot - not just the part after the first heartbeat - is fast. */
++	tulip_cpu_pll_up();
++
+ 	if (SecureDTLookupEntry(NULL, "/tulip-sdhci", &node) != kSuccess ||
+ 	    SecureDTGetProperty(node, "reg", (void const **)&reg, &size) != kSuccess ||
+ 	    size < 2 * sizeof(uintptr_t)) {
