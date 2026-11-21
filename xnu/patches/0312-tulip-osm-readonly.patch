@@ -1,0 +1,34 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -4955,6 +4955,31 @@
+ 				    (long long)tulip_storm[5], tulip_storm[6], (long long)tulip_storm[7], tulip_storm[8], tulip_storm[9]);
+ 			}
+ 			{
++				/* 0312: read-only look at the SDM660 OSM and the cluster PLLs. Needs tuliposm=1,
++				 * because a read the secure world blocks could reset the phone. */
++				static int osm_en = -1;
++				static volatile uint32_t *osm, *pll_s, *pll_g;
++
++				if (osm_en < 0) {
++					uint32_t v = 0;
++					osm_en = PE_parse_boot_argn("tuliposm", &v, sizeof(v)) && v == 1;
++					if (osm_en) {
++						osm = (volatile uint32_t *)ml_io_map(0x179c0000, 0x4000);
++						pll_s = (volatile uint32_t *)ml_io_map(0x17916000, 0x1000);
++						pll_g = (volatile uint32_t *)ml_io_map(0x17816000, 0x1000);
++					}
++				}
++				if (osm_en && osm && pll_s && pll_g) {
++					/* Silver OSM at +0, Gold OSM at +0x2000 */
++					printf("TULIP HB9: osm silver en %x des %x f %x v %x | gold en %x des %x f %x v %x | "
++					    "pll silver mode %x L %x user %x | gold mode %x L %x user %x\n",
++					    osm[0x1004 / 4], osm[0x1F10 / 4], osm[0x1154 / 4], osm[0x1158 / 4],
++					    osm[(0x2000 + 0x1004) / 4], osm[(0x2000 + 0x1F10) / 4],
++					    osm[(0x2000 + 0x1154) / 4], osm[(0x2000 + 0x1158) / 4],
++					    pll_s[0], pll_s[1], pll_s[3], pll_g[0], pll_g[1], pll_g[3]);
++				}
++			}
++			{
+ 				extern volatile uint32_t tulip_cpu_stage[8], tulip_cpu_rej, tulip_cpu_topo, tulip_cpu_calls;
+ 				extern volatile int64_t tulip_cpu_psci[8];
+ 				extern volatile int32_t tulip_cpu_pres[8];
