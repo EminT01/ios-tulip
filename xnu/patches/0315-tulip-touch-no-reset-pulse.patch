@@ -1,0 +1,20 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -551,13 +551,13 @@
+ 	sweet_console_muted = 0;
+ 	tt_a = (volatile uint32_t *)ml_io_map(0x03102000, 0x2000);
+ 	tt_b = (volatile uint32_t *)ml_io_map(0x03942000, 0x2000);
++	/*
++	 * 0315: no reset pulse. The stock driver has NVT_TOUCH_SUPPORT_HW_RST 0 and uses only the I2C
++	 * commands; the NT36672A is the panel's TDDI chip, so GPIO 66 may reset the display too.
++	 */
+ 	tt_set(67, 0, 0, 3);
+ 	tt_set(66, 1, 1, 0);
+ 	tulip_udelay(2000);
+-	tt_set(66, 1, 0, 0);
+-	tulip_udelay(5000);
+-	tt_set(66, 1, 1, 0);
+-	tulip_udelay(300000);
+ 	tt_sda(1); tt_scl(1);
+ 	printf("TULIP NVT: setup, idle SDA %d SCL %d irq %d\n", tt_get(2), tt_get(3), tt_get(67));
+ 	for (a = 0x01; a < 0x78; a++) {
