@@ -4,7 +4,6 @@
 #include <unistd.h>
 #include <objc/runtime.h>
 #include <objc/message.h>
-typedef void* id;
 #define S(x) sel_registerName(x)
 #define M ((id(*)(id,SEL,...))objc_msgSend)
 static void say(const char*f,...){char b[512];__builtin_va_list a;__builtin_va_start(a,f);int n=vsnprintf(b,512,f,a);__builtin_va_end(a);write(2,b,n);}
