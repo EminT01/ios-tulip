@@ -1,0 +1,46 @@
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1999,23 +1999,42 @@
+ 			tulip_irq_cntp++;
+ 		}
+ 		sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_TIMER);
+ 		cdp->cpu_decrementer = -1; /* Large */
+ 		INTERRUPT_MASKED_DEBUG_START(rtclock_intr, DBG_INTR_TYPE_TIMER);
+ 		if (intid == 30) {
+ 			uint64_t cntfrq, cntpct;
+ 
++			/*
++			 * TULIP 0316: re-arm this core's CNTP before the handler, and
++			 * only let the boot CPU run the handler.
++			 *
++			 * with cpus=8, HB7 showed CPU1 at 392 million timer interrupts
++			 * and CPU2/CPU3 at 375 million each, while cpus=1 ran with no
++			 * storm at all. XNU keeps one global timer queue: every core
++			 * calling rtclock_intr() for the same deadline has each of them
++			 * reprogramming (and re-reading) the same CNTV_CVAL, so the
++			 * deadline never stays in the future on any of them. HB8 caught
++			 * it 120504 ticks behind with pop-cnt equal to that number.
++			 *
++			 * The boot CPU owns the clock; the secondaries keep their CNTP
++			 * armed so the interrupt is acknowledged and cleared, but they do
++			 * not run the handler again. cpu_idle()'s software tick (0286)
++			 * still covers a core that is asleep.
++			 */
+ 			__asm__ volatile ("mrs %0, cntfrq_el0" : "=r"(cntfrq));
+ 			__asm__ volatile ("mrs %0, cntpct_el0" : "=r"(cntpct));
+ 			__builtin_arm_wsr64("CNTP_CVAL_EL0",
+ 			    cntpct + cntfrq / 1000);
+ 			__builtin_arm_wsr64("CNTP_CTL_EL0", 1);
+ 		}
+-		rtclock_intr(TRUE);
++		if (cpu_number() == 0) {
++			rtclock_intr(TRUE);
++		}
+ 		INTERRUPT_MASKED_DEBUG_END();
+ 		if (tulip_irq_timer_cpu[cpu_number() & 7] == 200000 && !tulip_storm_set) {
+ 			uint64_t vct, vctl, vcv, pctl, pcv, frq;
+ 
+ 			__asm__ volatile ("mrs %0, cntvct_el0" : "=r"(vct));
+ 			__asm__ volatile ("mrs %0, cntv_ctl_el0" : "=r"(vctl));
+ 			__asm__ volatile ("mrs %0, cntv_cval_el0" : "=r"(vcv));
+ 			__asm__ volatile ("mrs %0, cntp_ctl_el0" : "=r"(pctl));
