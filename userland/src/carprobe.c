@@ -22,7 +22,7 @@ static char sum[1024];static int sl;
 static void say(const char*f,...){char b[512];__builtin_va_list a;__builtin_va_start(a,f);int n=vsnprintf(b,512,f,a);__builtin_va_end(a);write(2,b,n);}
 static id ns(const char*s){return ((fc)objc_msgSend)(C("NSString"),S("stringWithUTF8String:"),s);}
 int main(int c,char**v){
- const char*path=c>1?v[1]:"/System/Library/PrivateFrameworks/SpringBoardHome.framework/BoundingPath-Assets.car";
+ const char*path=c>1?v[1]:"/System/Library/PrivateFrameworks/UIKitCore.framework/BoundingPathData.bundle/Assets.car";
  say("PROBE open %s\n",path);
  void*h=dlopen("/System/Library/PrivateFrameworks/CoreUI.framework/CoreUI",RTLD_NOW);
  say("PROBE coreui %p\n",h);
