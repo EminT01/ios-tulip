@@ -13,6 +13,7 @@ typedef id (*f2)(id,SEL,id,id*);
 typedef id (*fc)(id,SEL,const char*);
 typedef unsigned long (*fu)(id,SEL);
 typedef const char* (*fs)(id,SEL);
+typedef id (*fi)(id,SEL,unsigned long);
 #include <sys/stat.h>
 #define MS(r,s) ((fs)objc_msgSend)(r,S(s))
 #define M0(r,s) ((f0)objc_msgSend)(r,S(s))
@@ -51,12 +52,19 @@ int main(int c,char**v){
  id all=M0(cat,"allImageNames");
  unsigned long cnt=all?MU(all,"count"):0;
  say("PROBE allImageNames %p count %lu\n",all,cnt);
- const char*n[]={"BoundingPathBitmap-1125x2436-375x812-3.00x","BoundingPathBitmap-1125x2436-320x693-3.00x","BoundingPathBitmap-1080x2340-375x812-3.00x","BoundingPathBitmap-1170x2532-390x844-3.00x",0};
- for(int i=0;n[i];i++){
-  id d=M1(cat,"dataWithName:",ns(n[i]));
+ int tot=0,got=0,tgt=0; long tgtlen=-1;
+ for(unsigned long i=0;i<cnt;i++){
+  id nm=((fi)objc_msgSend)(all,S("objectAtIndex:"),i);
+  const char*u=nm?MS(nm,"UTF8String"):"?";
+  if(strncmp(u,"BoundingPathBitmap",18))continue;
+  tot++;
+  id d=M1(cat,"dataWithName:",nm);
   unsigned long l=d?MU(d,"length"):0;
-  say("PROBE %s -> %p len %lu\n",n[i],d,l);
-  sl+=snprintf(sum+sl,sizeof(sum)-sl,"%d=%lu ",i,l);
+  if(l)got++;
+  if(strstr(u,"1125x2436-375x812")){tgt++;tgtlen=l;say("PROBE T %s -> %p len %lu\n",u,d,l);}
+  if(i<3)say("PROBE N%lu %s -> len %lu\n",i,u,l);
  }
- for(;;){say("PROBE SUM cat %p names %lu lens %s\n",cat,cnt,sum);sleep(2);}
+ id un=ns("BoundingPathBitmap-1125x2436-375x812-3.00x"); id d2=M1(cat,"dataWithName:",un);
+ say("PROBE V mine %p\n",d2);
+ for(;;){say("PROBE SUM7 cat %p names %lu bpb %d got %d tgt %d tgtlen %ld\n",cat,cnt,tot,got,tgt,tgtlen);sleep(2);}
  return 0;}
