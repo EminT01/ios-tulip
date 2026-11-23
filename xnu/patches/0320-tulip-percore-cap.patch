@@ -1,0 +1,172 @@
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1981,108 +1981,105 @@
+ 	uint32_t intid = (uint32_t)(iar & 0xFFFFFF);
+ 
+ 	if (intid >= 1020 && intid <= 1023) {
+ 		tulip_irq_spur++;
+ 		return; /* spurious */
+ 	}
+ 	if (intid == sweet_vtimer_intid || intid == 30) {
+ 		/*
+-		 * TULIP 0284: the EL1 physical timer (PPI 30) stands in for the
+-		 * virtual timer. 0282/0283 showed CNTV expires (CTL 0x5, CVAL in
+-		 * the past) while GICR_ISPENDR0 reports bit 30 and not bit 19, so
+-		 * this redistributor only ever sees the physical PPI. CNTPCT and
+-		 * CNTVCT share the architected counter, so the tick treatment is
+-		 * identical; CNTP is re-armed here before the EOI.
+-		 */
+-		tulip_irq_timer++;
+-		tulip_irq_timer_cpu[cpu_number() & 7]++;
+-		if (intid == 30) {
+-			tulip_irq_cntp++;
+-		}
+-		/*
+-		 * TULIP 0317: close the physical timer for good.
++		 * TULIP 0320: one clock owner per core, and a hard cap on the storm.
+ 		 *
+-		 * 0316 kept PPI 30 armed on every core and ran the handler on the
+-		 * boot CPU only, but HB7 still showed CPU1 at 760 million timer
+-		 * interrupts while CPU2..7 sat at zero, and HB8 recorded
+-		 * cntp ctl 1 with cval-cnt +19165 - the re-arm was correct and the
+-		 * interrupt still came back immediately. A level-triggered PPI whose
+-		 * handler runs without the source being disabled re-enters as soon
+-		 * as ICC_EOIR1_EL1 is written, and 0316 wrote the EOI at the very
+-		 * bottom of this branch, after the handler.
++		 * Measured across the last boots:
+ 		 *
+-		 * So: acknowledge first, mask CNTP_CVAL with CNTP_CTL 0x2, run the
+-		 * handler on the boot CPU, and leave it masked. The clock is
+-		 * cpu_idle()'s software tick (0286) on every core; that is the only
+-		 * configuration that has ever run this device without a storm.
++		 *   cpus=1   hardware tick 64935, soft tick 0, no storm
++		 *   cpus=8   CPU1 760M, CPU4 74M, soft tick rising, procs 8/8
++		 *
++		 * 0319 dropped the fixed 1 ms re-arm and copied XNU's own deadline
++		 * into CNTV and CNTP, which took CPU1 from 760M to 32k and let all
++		 * eight cores come online - so the deadline source was right. What
++		 * it did not fix is a core that still runs away: HB8 mid-storm shows
++		 * cntp ctl 1 with cval-cnt -77905, the deadline already 4 ms in the
++		 * past, and nothing re-arms it because this branch masks CNTP_CTL
++		 * and returns.
++		 *
++		 * So: ack, run the handler on every core (that is what keeps XNU
++		 * from dropping them), then re-arm from XNU's deadline - and when a
++		 * core's own counter says it is in the storm, stretch the period so
++		 * it cannot outrun the counter again. The cap is per core and has no
++		 * effect on a healthy one.
+ 		 */
+-		if (intid == 30) {
++		{
++			uint64_t frq, now, vcv, period;
++			uint64_t *cnt = (uint64_t *)&tulip_irq_timer_cpu[cpu_number() & 7];
++
++			tulip_irq_timer++;
++			tulip_irq_timer_cpu[cpu_number() & 7]++;
++			if (intid == 30) {
++				tulip_irq_cntp++;
++			}
+ 			__builtin_arm_wsr64("ICC_EOIR1_EL1", iar);
+ 			__builtin_arm_isb(ISB_SY);
+-			__builtin_arm_wsr64("CNTP_CTL_EL0", 2);
++
+ 			sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_TIMER);
+ 			cdp->cpu_decrementer = -1;
+ 			INTERRUPT_MASKED_DEBUG_START(rtclock_intr, DBG_INTR_TYPE_TIMER);
+-			if (cpu_number() == 0) {
+-				rtclock_intr(TRUE);
+-			}
++			rtclock_intr(TRUE);
+ 			INTERRUPT_MASKED_DEBUG_END();
+-			if (tulip_irq_timer_cpu[cpu_number() & 7] == 200000 &&
+-			    !tulip_storm_set) {
+-				uint64_t vct, vctl, vcv, pctl, pcv, frq;
++
++			__asm__ volatile ("mrs %0, cntfrq_el0" : "=r"(frq));
++			__asm__ volatile ("mrs %0, cntvct_el0" : "=r"(now));
++			__asm__ volatile ("mrs %0, cntv_cval_el0" : "=r"(vcv));
++			if (frq == 0) {
++				frq = 19200000;
++			}
++			period = frq / 100;
++			/*
++			 * TULIP 0320: storm brake. A core past 100k interrupts backs off
++			 * to 25 Hz, past 1M to 10 Hz. A healthy core sits near 100 Hz and
++			 * never reaches the first threshold, so the normal path is
++			 * unchanged; a runaway core stops burning the CPU in the
++			 * handler and the boot finishes.
++			 */
++			if (*cnt > 1000000) {
++				period = frq / 10;
++			} else if (*cnt > 100000) {
++				period = frq / 25;
++			}
++			if (vcv <= now || vcv > now + 4 * period) {
++				/* XNU left it in the past, or absurdly far ahead */
++				vcv = now + period;
++			}
++			__builtin_arm_wsr64("CNTV_CVAL_EL0", vcv);
++			__builtin_arm_wsr64("CNTV_CTL_EL0", 1);
++			__builtin_arm_wsr64("CNTP_CVAL_EL0", vcv);
++			__builtin_arm_wsr64("CNTP_CTL_EL0", 1);
++			__builtin_arm_isb(ISB_SY);
++
++			if (*cnt == 200000 && !tulip_storm_set) {
++				uint64_t vct, vctl, pctl, pcv;
+ 
+ 				__asm__ volatile ("mrs %0, cntvct_el0" : "=r"(vct));
+ 				__asm__ volatile ("mrs %0, cntv_ctl_el0" : "=r"(vctl));
+-				__asm__ volatile ("mrs %0, cntv_cval_el0" : "=r"(vcv));
+ 				__asm__ volatile ("mrs %0, cntp_ctl_el0" : "=r"(pctl));
+ 				__asm__ volatile ("mrs %0, cntp_cval_el0" : "=r"(pcv));
+-				__asm__ volatile ("mrs %0, cntfrq_el0" : "=r"(frq));
+ 				tulip_storm[0] = cpu_number();
+ 				tulip_storm[1] = intid;
+ 				tulip_storm[2] = vctl;
+ 				tulip_storm[3] = vcv - vct;
+ 				tulip_storm[4] = pctl;
+ 				tulip_storm[5] = pcv - vct;
+ 				tulip_storm[6] = frq;
+ 				tulip_storm[7] = cdp->rtcPop - vct;
+ 				tulip_storm[8] = cdp->cpu_idle_pop;
+ 				tulip_storm[9] = tulip_irq_cntp;
+ 				tulip_storm_set = 1;
+ 			}
+-			__builtin_arm_isb(ISB_SY);
+ 			return;
+ 		}
+-		sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_TIMER);
+-		cdp->cpu_decrementer = -1; /* Large */
+-		INTERRUPT_MASKED_DEBUG_START(rtclock_intr, DBG_INTR_TYPE_TIMER);
+-		rtclock_intr(TRUE);
+-		INTERRUPT_MASKED_DEBUG_END();
+-		if (tulip_irq_timer_cpu[cpu_number() & 7] == 200000 && !tulip_storm_set) {
+-			uint64_t vct, vctl, vcv, pctl, pcv, frq;
+-
+-			__asm__ volatile ("mrs %0, cntvct_el0" : "=r"(vct));
+-			__asm__ volatile ("mrs %0, cntv_ctl_el0" : "=r"(vctl));
+-			__asm__ volatile ("mrs %0, cntv_cval_el0" : "=r"(vcv));
+-			__asm__ volatile ("mrs %0, cntp_ctl_el0" : "=r"(pctl));
+-			__asm__ volatile ("mrs %0, cntp_cval_el0" : "=r"(pcv));
+-			__asm__ volatile ("mrs %0, cntfrq_el0" : "=r"(frq));
+-			tulip_storm[0] = cpu_number();
+-			tulip_storm[1] = intid;
+-			tulip_storm[2] = vctl;
+-			tulip_storm[3] = vcv - vct;
+-			tulip_storm[4] = pctl;
+-			tulip_storm[5] = pcv - vct;
+-			tulip_storm[6] = frq;
+-			tulip_storm[7] = cdp->rtcPop - vct;
+-			tulip_storm[8] = cdp->cpu_idle_pop;
+-			tulip_storm[9] = tulip_irq_cntp;
+-			tulip_storm_set = 1;
+-		}
+-		__builtin_arm_wsr64("ICC_EOIR1_EL1", iar);
+ 	} else if (intid < 16) {
+ 		tulip_irq_ipi++;
+ 		tulip_sgi_seen[intid & 15]++;
+ 		sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_IPI);
+ 		/* Ack before handling so an IPI raised meanwhile is not lost */
+ 		__builtin_arm_wsr64("ICC_EOIR1_EL1", iar);
+ 		__builtin_arm_isb(ISB_SY);
+ 		cpu_signal_handler();
