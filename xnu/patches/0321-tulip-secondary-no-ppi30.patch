@@ -1,0 +1,58 @@
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -34,16 +34,20 @@
+ 
+ #if defined(VINCE)
+ extern "C" {
+ extern vm_offset_t vince_gicd_base;
+ extern vm_offset_t vince_gicc_base;
+ extern uint32_t vince_vtimer_intid;
+ #if defined(VINCE_GIC_V3)
+ extern vm_offset_t vince_gicr_base;
++/* TULIP 0321: VINCE.h defines ISENABLER0 but not its clear counterpart. */
++#ifndef GICR_ICENABLER0
++#define GICR_ICENABLER0 0x10180
++#endif
+ #endif
+ extern unsigned int LowResetVectorBase;
+ vm_offset_t ml_static_vtop(vm_offset_t);
+ vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ extern volatile uint64_t *vince_smp_mark_va;
+ void vince_smp_mark(uint64_t code);
+ }
+ 
+@@ -86,16 +90,34 @@
+ 		}
+ 	}
+ 	*(volatile uint32_t *)(rd + GICR_IGROUPR0) = 0xffffffff;
+ 	for (unsigned int i = 0; i < 32; i++) {
+ 		*(volatile uint8_t *)(rd + GICR_IPRIORITYR0 + i) = 0xa0;
+ 	}
+ 	*(volatile uint32_t *)(rd + GICR_ISENABLER0) =
+ 	    (1U << vince_vtimer_intid) | (1U << VINCE_IPI_SGI);
++	/*
++	 * TULIP 0321: keep the physical timer PPI away from the secondaries.
++	 *
++	 * This function is only called from initCPU()s !fBoot path, so every
++	 * frame it touches belongs to a secondary core. pe_init_fiq() enables
++	 * PPI 30 as well when it brings the boot CPU frame up, and that enable
++	 * survives on the redistributor: HB7 showed CPU1 taking 12 million timer
++	 * interrupts in 44 seconds while a healthy core sits near a thousand,
++	 * and HB8 put the deadline 0.8 ms in the past there. This function only
++	 * ever enabled the virtual timer PPI and SGI1, so the physical one was
++	 * inherited from the boot CPU rather than asked for.
++	 *
++	 * Write GICR_ICENABLER0 bit 30 here and let cpu_idle()s software tick
++	 * (0286) be the clock on the secondaries, which is the configuration
++	 * that ran this device without a storm. The boot CPU keeps PPI 30, and
++	 * 0320 still arms CNTV as the primary source on every core.
++	 */
++	*(volatile uint32_t *)(rd + GICR_ICENABLER0) = (1U << 30);
+ 	__builtin_arm_dsb(DSB_SY);
+ }
+ #endif /* VINCE_GIC_V3 */
+ 
+ #if defined(VINCE_GIC_V3)
+ extern "C" volatile uint32_t tulip_sgi_seen[16];
+ extern "C" volatile uint32_t tulip_sgi_mask;
+ 
