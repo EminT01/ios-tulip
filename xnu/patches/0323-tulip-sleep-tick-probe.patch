@@ -11,7 +11,7 @@ diff -U3 -r a/bsd/dev/sweet_sample.c b/bsd/dev/sweet_sample.c
 + * The HB line showed 8 wakes in 1006 s, i.e. roughly 125 s per wakeup for a
 + * loop that asks for 30 * hz - a factor of four. Either hz is not 100, or the
 + * deadline is programmed correctly and the core wakes up late; the two have
-+ * very different fixes, so record both numbers here and let HB12 print them:
++ * very different fixes, so record both numbers here and let HB13 print them:
 + *  [0] microseconds slept in the last tsleep
 + *  [1] ticks that tsleep was asked to sleep (the 30 * hz argument)
 + *  [2] hz as the kernel sees it
@@ -109,7 +109,7 @@ diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
 +				if (tulip_sleep_hz != 0) {
 +					asked_us = tulip_sleep_ask_ticks * 1000000ULL / tulip_sleep_hz;
 +				}
-+				printf("TULIP HB12: sleep last %llu us asked %llu us (%llu ticks, hz %d) "
++				printf("TULIP HB13: sleep last %llu us asked %llu us (%llu ticks, hz %d) "
 +				    "ratio %llu.%02llu worst %llu us calls %llu hznow %d\n",
 +				    (unsigned long long)tulip_sleep_us, (unsigned long long)asked_us,
 +				    (unsigned long long)tulip_sleep_ask_ticks, hz,
