@@ -1,0 +1,18 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -5079,5 +5079,15 @@
+ 				    idle_ms[6], idle_ms[7], tulip_idle_wakes[0], tulip_idle_wakes[1],
+ 				    tulip_idle_wakes[2], tulip_idle_wakes[3]);
++				{
++					/* TULIP 0323: HB13, is the kernel clock really 19.2 MHz? */
++					uint64_t fq, pct, mat;
++
++					__asm__ volatile ("mrs %0, cntfrq_el0" : "=r"(fq));
++					__asm__ volatile ("isb; mrs %0, cntpct_el0" : "=r"(pct));
++					mat = mach_absolute_time();
++					printf("TULIP HB13: cntfrq %llu cntpct %llu ms(19.2M) mach %llu ms(19.2M)\n",
++					    fq, pct / 19200, mat / 19200);
++				}
+ 				if (!tulip_bench_done) {
+ 					uint64_t t0, t1, t2, x = 1, sum = 0;
+ 					unsigned i, pass;
