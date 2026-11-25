@@ -49,7 +49,7 @@ VTIMER_INTID = 19    # CNTV: Qualcomm numbers the timer PPIs 1/2/3/0 (secure phy
 VINCE_ECID = 0x54554c4950000001  # 'TULIP' + 1
 BOOT_MANIFEST_HASH = hashlib.sha384(b'tulip boot manifest').digest()
 
-D22AP_ADT = os.environ.get('D22AP_ADT', os.path.join(os.path.dirname(os.path.abspath(__file__)), '../research/ipsw-x/d22ap.adt'))
+D22AP_ADT = os.environ.get('D22AP_ADT', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'd22ap.adt'))
 
 def d22ap_product(path=D22AP_ADT):
     """Fallback or extract /product properties from iPhone X device tree."""
