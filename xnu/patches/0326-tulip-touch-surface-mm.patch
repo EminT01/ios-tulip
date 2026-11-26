@@ -1,0 +1,23 @@
+diff -U3 -r a/iokit/Kernel/arm/hid/SweetHID.cpp b/iokit/Kernel/arm/hid/SweetHID.cpp
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp	2026-11-26 17:54:41.822793036 +0300
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp	2026-11-26 17:54:41.823843913 +0300
+@@ -516,8 +516,19 @@
+ #endif
+ 	/* The digitizer covers the main display (backboardd maps it 1:1). */
+ 	setProperty("DisplayIntegrated", kOSBooleanTrue);
++#if defined(VINCE_TULIP)
++	/*
++	 * TULIP 0326: the physical size drives the mapping backboardd applies to
++	 * the digitizer. 68x151 mm is the iPhone X panel and was left in place
++	 * while the touch code below already worked in Redmi Note 6 Pro pixels, so
++	 * a tap landed in the wrong place. Use the real 75x158 mm.
++	 */
++	setProperty("SurfaceWidth", (unsigned long long)(75 << 16), 32);	/* mm, 16.16 */
++	setProperty("SurfaceHeight", (unsigned long long)(158 << 16), 32);
++#else
+ 	setProperty("SurfaceWidth", (unsigned long long)(68 << 16), 32);	/* mm, 16.16 */
+ 	setProperty("SurfaceHeight", (unsigned long long)(151 << 16), 32);
++#endif
+ 	gSweetTouch = this;
+ 	registerService();
+ 	IOLog("TULIP HID: touch registered\n");
