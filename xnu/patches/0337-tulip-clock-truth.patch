@@ -1,0 +1,49 @@
+diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c	2026-11-26 22:49:41.454017193 +0300
++++ b/bsd/dev/tulip_sdhci.c	2026-11-26 22:49:41.455149720 +0300
+@@ -5166,6 +5166,45 @@
+ 			}
+ 			{
+ 				/*
++				 * TULIP 0337: the clock bookkeeping in one line.
++				 *
++				 * HB13 showed cntpct 18074380183812 while mach said 184730 ms.
++				 * At 19.2 MHz the counter reads 3.5e12 after 184 s, so the two
++				 * disagree and every timeout, every sleep and the tick rate
++				 * downstream of them is wrong. That is the boot that takes an
++				 * hour and the UI that answers a key press a minute later -
++				 * not the eMMC and not the idle loop.
++				 *
++				 * Print every number the kernel actually uses, so the wrong one
++				 * is visible instead of inferred:
++				 *   cntfrq    the counter frequency the CPU reports
++				 *   cntpct    the architectural counter, and its seconds at cntfrq
++				 *   timebase  gPEClockFrequencyInfo.timebase_frequency_hz, which
++				 *             mach_absolute_time() is converted with
++				 *   mach      mach_absolute_time() and its milliseconds
++				 * If cntpct/cntfrq and mach disagree, the ratio says which of
++				 * the two clocks is lying.
++				 */
++				uint64_t cntfrq = 0, cntpct = 0, mach_now = 0, mach_ns = 0;
++				uint32_t tb_freq = 0;
++
++				__asm__ volatile ("mrs %0, cntfrq_el0" : "=r"(cntfrq));
++				__asm__ volatile ("mrs %0, cntpct_el0" : "=r"(cntpct));
++				mach_now = mach_absolute_time();
++				absolutetime_to_nanoseconds(mach_now, &mach_ns);
++				{
++					extern clock_frequency_info_t gPEClockFrequencyInfo;
++					tb_freq = (uint32_t)gPEClockFrequencyInfo.timebase_frequency_hz;
++				}
++				printf("TULIP HB15: cntfrq %llu cntpct %llu (%llu s at cntfrq) "
++				    "timebase %u mach %llu (%llu ms)\n",
++				    (unsigned long long)cntfrq, (unsigned long long)cntpct,
++				    (unsigned long long)(cntfrq ? cntpct / cntfrq : 0),
++				    tb_freq, (unsigned long long)mach_now,
++				    (unsigned long long)(mach_ns / 1000000ULL));
++			}
++			{
++				/*
+ 				 * TULIP 0334: how each core leaves cpu_idle(). A core with
+ 				 * WFI near zero never sleeps at all; on eight cores that
+ 				 * hands the entire UI to whichever single core runs it,
