@@ -1,0 +1,108 @@
+diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c	2026-11-26 23:43:30.805196896 +0300
++++ b/bsd/dev/tulip_sdhci.c	2026-11-26 23:43:30.806188257 +0300
+@@ -5481,17 +5481,19 @@
+ 				 * which is the minute-long lag seen on the lock screen.
+ 				 */
+ 				extern volatile uint64_t tulip_idle_enter[8], tulip_idle_wfi[8],
+-				    tulip_idle_arm0[8], tulip_idle_ast[8], tulip_idle_sigp[8];
++				    tulip_idle_arm0[8], tulip_idle_ast[8], tulip_idle_sigp[8],
++				    tulip_idle_irq[8];
+ 				unsigned c;
+ 
+-				printf("TULIP HB14: idle loop per cpu enter/wfi/arm0/ast/sigp\n");
++				printf("TULIP HB14: idle loop per cpu enter/wfi/arm0/ast/sigp/irq\n");
+ 				for (c = 0; c < 8; c++) {
+-					printf("TULIP HB14:  cpu%u %llu / %llu / %llu / %llu / %llu\n", c,
++					printf("TULIP HB14:  cpu%u %llu / %llu / %llu / %llu / %llu / %llu\n", c,
+ 					    (unsigned long long)tulip_idle_enter[c],
+ 					    (unsigned long long)tulip_idle_wfi[c],
+ 					    (unsigned long long)tulip_idle_arm0[c],
+ 					    (unsigned long long)tulip_idle_ast[c],
+-					    (unsigned long long)tulip_idle_sigp[c]);
++					    (unsigned long long)tulip_idle_sigp[c],
++					    (unsigned long long)tulip_idle_irq[c]);
+ 				}
+ 			}
+ 			{
+diff -U3 -r a/osfmk/arm64/cpu.c b/osfmk/arm64/cpu.c
+--- a/osfmk/arm64/cpu.c	2026-11-26 23:41:21.961908734 +0300
++++ b/osfmk/arm64/cpu.c	2026-11-26 23:41:21.962321949 +0300
+@@ -612,6 +612,42 @@
+ 				tulip_idle_ast[cpu_data_ptr->cpu_number & 7]++;
+ 				break;
+ 			}
++			/*
++			 * TULIP 0340: a pending Group 1 interrupt has to be taken off
++			 * the CPU interface here.
++			 *
++			 * HB14 said every secondary woke 42 to 81 MILLION times in 44
++			 * seconds while its enter counter stayed at 1, and HB7 said four
++			 * cores never take a timer interrupt at all. Both come from the
++			 * same mistake: this loop never reads ICC_IAR1_EL1, so an
++			 * interrupt that arrives while the core is idle stays pending,
++			 * WFI returns immediately, and the core spins at a million wakes
++			 * a second doing no work. It also starves the one core that
++			 * actually runs the UI, which is the ten-second lag on a key
++			 * press.
++			 *
++			 * Read IAR1: anything below 1020 is a real interrupt. Acknowledge
++			 * it with EOI and leave the idle loop so the normal handler can
++			 * run - cpu_idle() returns, the scheduler runs, and the interrupt
++			 * is serviced through sleh_irq(). A spurious id (1020-1023) is
++			 * dropped and the core sleeps again.
++			 */
++			{
++				extern volatile uint64_t tulip_idle_irq[8];
++				uint64_t iar = __builtin_arm_rsr64("ICC_IAR1_EL1");
++				uint32_t id = (uint32_t)(iar & 0xFFFFFF);
++
++				if (id < 1020) {
++					__builtin_arm_wsr64("ICC_EOIR1_EL1", iar);
++					__builtin_arm_isb(ISB_SY);
++					tulip_idle_irq[cpu_data_ptr->cpu_number & 7]++;
++					break;
++				}
++				if (id > 1023) {
++					/* not a spurious id either: leave it alone */
++					break;
++				}
++			}
+ 			wfi_deadline = tulip_soft_tick_arm();
+ 			if (wfi_deadline == 0) {
+ 				tulip_idle_arm0[cpu_data_ptr->cpu_number & 7]++;
+@@ -628,6 +664,23 @@
+ 			__asm__ volatile ("mrs %0, cntpct_el0" : "=r"(tulip_idle_t1));
+ 			tulip_idle_ticks[cpu_data_ptr->cpu_number & 7] += tulip_idle_t1 - tulip_idle_t0;
+ 			tulip_idle_wakes[cpu_data_ptr->cpu_number & 7]++;
++			/*
++			 * And once more after WFI: that is where the interrupt that woke
++			 * the core is waiting on this SoC, because TrustZone delivers the
++			 * timer as a Group 1 IRQ rather than an FIQ.
++			 */
++			{
++				extern volatile uint64_t tulip_idle_irq[8];
++				uint64_t iar = __builtin_arm_rsr64("ICC_IAR1_EL1");
++				uint32_t id = (uint32_t)(iar & 0xFFFFFF);
++
++				if (id < 1020) {
++					__builtin_arm_wsr64("ICC_EOIR1_EL1", iar);
++					__builtin_arm_isb(ISB_SY);
++					tulip_idle_irq[cpu_data_ptr->cpu_number & 7]++;
++					break;
++				}
++			}
+ 		}
+ 		Idle_load_context();
+ 	}
+diff -U3 -r a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+--- a/osfmk/arm64/sleh.c	2026-11-26 23:41:21.962502437 +0300
++++ b/osfmk/arm64/sleh.c	2026-11-26 23:41:21.963517461 +0300
+@@ -1885,6 +1885,7 @@
+ volatile uint64_t tulip_idle_arm0[8];    /* tulip_soft_tick_arm() returned 0 */
+ volatile uint64_t tulip_idle_ast[8];     /* left, AST pending */
+ volatile uint64_t tulip_idle_sigp[8];    /* left, SIGPdisabled */
++volatile uint64_t tulip_idle_irq[8];     /* TULIP 0340: interrupt acked in cpu_idle */
+ 
+ int
+ tulip_soft_tick_due(void)
