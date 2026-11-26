@@ -1,0 +1,51 @@
+diff -U3 -r a/bsd/dev/sweet_keys.c b/bsd/dev/sweet_keys.c
+--- a/bsd/dev/sweet_keys.c	2026-11-26 20:10:42.588637223 +0300
++++ b/bsd/dev/sweet_keys.c	2026-11-26 20:10:42.588881750 +0300
+@@ -4,7 +4,14 @@
+  * PMIC access is READ ONLY: the sole MMIO write issues EXT_READL on an
+  * observer channel. No PMIC config, IRQ acknowledge or reset writes exist.
+  */
+-#if defined(ARM64_BOARD_CONFIG_SWEET)
++/*
++ * TULIP 0332: VINCE builds (tulip) compile this file too. The guard used to be
++ * ARM64_BOARD_CONFIG_SWEET alone, so on this board the whole driver was
++ * preprocessed away and sweet_keys_init() did not exist - nothing called it
++ * and the kernel had no "TULIP KEYS" string at all. The PMIC layout below is
++ * the PM660 one 0328 brought in, which is what SDM636 needs.
++ */
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_VINCE)
+ #include <sys/param.h>
+ #include <sys/systm.h>
+ #include <kern/clock.h>
+@@ -323,4 +330,4 @@
+ 	    gmt ? "" : " (not Unix time: calendar from sweetrtc)");
+ 	return gmt;
+ }
+-#endif /* ARM64_BOARD_CONFIG_SWEET */
++#endif /* ARM64_BOARD_CONFIG_SWEET || ARM64_BOARD_CONFIG_VINCE */
+diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c	2026-11-26 20:10:42.588956117 +0300
++++ b/bsd/dev/tulip_sdhci.c	2026-11-26 20:10:42.590077243 +0300
+@@ -1592,6 +1592,8 @@
+ static int sdhci_reset_paths(void);
+ static int sdhci_enable_card_clock(void);
+ extern void sweet_sample_start(void);
++/* TULIP 0332: button driver; sweet_keys.c is compiled for VINCE now */
++extern void sweet_keys_init(void);
+ extern void tulip_sync_start(void);
+ extern void vince_bt_start(void);
+ static bool sdhci_ext_csd_sane(void);
+@@ -6083,6 +6085,13 @@
+ 	vince_bt_start();
+ 	/* TULIP 0271: FTS touch probe (boot-arg touchprobe=1) */
+ 	tulip_touch_start();
++	/*
++	 * TULIP 0332: the power and volume keys over the PM660 SPMI arbiter.
++	 * sweet_ufs.c calls this for its boards, but tulip is built on the SDHCI
++	 * path, so nothing ever started the button thread here. Boot-arg
++	 * sweetkeys=0 still disables it.
++	 */
++	sweet_keys_init();
+ 	return 0;
+ }
+ 
