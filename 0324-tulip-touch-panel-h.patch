@@ -1,0 +1,15 @@
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -362,7 +362,12 @@
+ #define SWEET_TOUCH_EDGE_PX 48
+ #if defined(ARM64_BOARD_CONFIG_VINCE)
+ /* vince: 1080x2160 panel showing the centered part of 1125x2436 (SweetFramebuffer.cpp) */
++#if defined(VINCE_TULIP)
++/* TULIP 0324: Redmi Note 6 Pro panel is 1080x2280 (NVT range 1080,2280), not vince's 2160 */
++#define SWEET_TOUCH_PANEL_H 2280
++#else
+ #define SWEET_TOUCH_PANEL_H 2160
++#endif
+ #else
+ #define SWEET_TOUCH_PANEL_H 2400
+ #endif
