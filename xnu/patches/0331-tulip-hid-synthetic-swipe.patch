@@ -1,0 +1,89 @@
+diff -U3 -r a/iokit/Kernel/arm/hid/SweetHID.cpp b/iokit/Kernel/arm/hid/SweetHID.cpp
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp	2026-11-26 19:43:09.820814222 +0300
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp	2026-11-26 19:43:09.821090726 +0300
+@@ -420,6 +420,12 @@
+ 	virtual UInt32 getPrimaryUsage() APPLE_KEXT_OVERRIDE { return kHIDUsage_Dig_TouchScreen; }
+ 	virtual UInt32 getProductID() APPLE_KEXT_OVERRIDE { return 2; }
+ private:
++	/* TULIP 0331: optional synthetic swipe, for testing the gesture path */
++	static void swipeFired(OSObject *owner, IOTimerEventSource *sender);
++	IOTimerEventSource *fSwipe;
++	UInt32 fSwipeSecs;              /* boot-arg sweettouchtest, 0 = off */
++	UInt32 fSwipeCount;
++	int    fSwipeStep;              /* -1 idle, 0..steps */
+ 	IOLock *fLock;
+ 	int fLogicalW, fLogicalH, fOffX, fOffY;
+ 	int fMinX, fMaxX;       /* panel columns that show the display (VINCE scale-to-fit: the bars are outside) */
+@@ -529,6 +535,23 @@
+ 	setProperty("SurfaceWidth", (unsigned long long)(68 << 16), 32);	/* mm, 16.16 */
+ 	setProperty("SurfaceHeight", (unsigned long long)(151 << 16), 32);
+ #endif
++	/*
++	 * TULIP 0331: sweettouchtest=N sends one synthetic swipe up from the
++	 * bottom edge every N seconds. It exercises exactly the path the home
++	 * gesture needs - edge band, FromEdgeTip and the corner/force bits 0327
++	 * sets - without depending on the NVT driver producing a finger at the
++	 * right moment, so it separates "the gesture is not recognised" from
++	 * "the touch never arrives".
++	 */
++	fSwipeStep = -1;
++	fSwipeCount = 0;
++	fSwipe = NULL;
++	if (PE_parse_boot_argn("sweettouchtest", &fSwipeSecs, sizeof(fSwipeSecs)) && fSwipeSecs) {
++		fSwipe = IOTimerEventSource::timerEventSource(this, &SweetHIDTouch::swipeFired);
++		if (fSwipe && _hidWorkLoop->addEventSource(fSwipe) == kIOReturnSuccess) {
++			fSwipe->setTimeoutMS(fSwipeSecs * 1000);
++		}
++	}
+ 	gSweetTouch = this;
+ 	registerService();
+ 	IOLog("TULIP HID: touch registered\n");
+@@ -641,6 +664,48 @@
+ 	collection->release();
+ }
+ 
++/*
++ * TULIP 0331: one synthetic home swipe.
++ *
++ * A home gesture has to begin inside the bottom edge band (SWEET_TOUCH_EDGE_PX
++ * above the last row) because only there does touch() set the edge bits UIKit
++ * reads. Start at panel height - 10 and lift at roughly a third of the panel,
++ * well past the unlock threshold, in twelve steps.
++ */
++void
++SweetHIDTouch::swipeFired(OSObject *owner, IOTimerEventSource *sender)
++{
++	SweetHIDTouch *self = (SweetHIDTouch *)owner;
++	const int steps = 12;
++	const int yStart = SWEET_TOUCH_PANEL_H - 10;
++	const int yEnd = SWEET_TOUCH_PANEL_H / 3;
++	const int xMid = 540;
++	int step = self->fSwipeStep;
++
++	if (step < 0) {
++		self->fSwipeStep = step = 0;
++		IOLog("TULIP HID: synthetic swipe %u from y %d to %d\n",
++		    self->fSwipeCount + 1, yStart, yEnd);
++	}
++	if (step == 0) {
++		self->touch(0, true, xMid, yStart);
++	} else if (step <= steps) {
++		int y = yStart - (step * (yStart - yEnd)) / steps;
++		self->touch(0, true, xMid, y);
++	} else {
++		self->touch(0, false, xMid, yEnd);
++		self->fSwipeStep = -1;
++		if (++self->fSwipeCount < 30) {
++			IOLog("TULIP HID: synthetic swipe %u sent, next in %u s\n",
++			    self->fSwipeCount, self->fSwipeSecs);
++			sender->setTimeoutMS(self->fSwipeSecs * 1000);
++		}
++		return;
++	}
++	self->fSwipeStep++;
++	sender->setTimeoutMS(25);
++}
++
+ /* key: 0 power (side button), 1 volume up, 2 volume down, 3 home */
+ extern "C" void
+ sweet_hid_key(int key, int down)

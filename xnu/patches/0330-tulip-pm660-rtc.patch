@@ -1,0 +1,134 @@
+diff -U3 -r a/bsd/dev/sweet_keys.c b/bsd/dev/sweet_keys.c
+--- a/bsd/dev/sweet_keys.c	2026-11-26 19:40:04.237177103 +0300
++++ b/bsd/dev/sweet_keys.c	2026-11-26 19:40:04.237702307 +0300
+@@ -224,4 +224,103 @@
+ 		printf("TULIP KEYS: kernel_thread_start failed %d\n", kr);
+ 	}
+ }
++
++/*
++ * TULIP 0330: the PM660 real-time clock, read-only, through the same SPMI
++ * arbiter the keys already use.
++ *
++ * DTB: pm660@0 qcom,pm660_rtc ("qcom,qpnp-rtc", qcom,qpnp-rtc-write = <0>)
++ * with rtc_rw@6000: PPID 0x060 (SID 0, peripheral 0x60). Registers (Linux
++ * qpnp-rtc.c / rtc-pm8xxx.c): RTC_CTRL 0x46 (bit 7 RTC_ENABLE), RTC_RDATA0..3
++ * 0x48..0x4b, the 32-bit seconds counter, little endian. The counter keeps
++ * running while the phone is off, but Android never writes it (rtc-write = 0,
++ * time_daemon keeps its own offset), so it is not necessarily Unix time.
++ *
++ * tulip_rtc_gmt() becomes IOPlatformExpert::getGMTTimeOfDay(), which used to
++ * return 0 and left the calendar at 1970. It returns raw + sweetrtcoff=<secs>
++ * when that boot-arg is given, else the raw value if it already looks like
++ * Unix time, else 0 so the calendar keeps its own default. The raw value is
++ * always logged, so the offset can be read once from a live log and passed on
++ * every later boot.
++ */
++#define RTC_PPID                0x060u
++#define RTC_CTRL                0x46u
++#define RTC_ENABLE              (1u << 7)
++#define RTC_RDATA0              0x48u
++#define RTC_PLAUSIBLE_MIN       1577836800u     /* 2020-01-01 00:00:00 UTC */
++
++static bool
++tulip_rtc_read(uint32_t *secs, uint8_t *ctrl)
++{
++	static vm_offset_t rtc_chan;
++	static bool tried;
++
++	if (!tried) {
++		tried = true;
++		if (keys_core == 0) {
++			keys_core = ml_io_map(KEYS_CORE_PA, KEYS_CORE_SIZE);
++			keys_cnfg = ml_io_map(KEYS_CNFG_PA, 0x1000);
++		}
++		if (keys_core == 0 || keys_cnfg == 0) {
++			return false;
++		}
++		uint32_t version = keys_rd(keys_core, 0);
++		if (version < KEYS_ARB_MIN || version >= KEYS_ARB_END) {
++			printf("TULIP RTC: unsupported arbiter version=%#x\n", version);
++			return false;
++		}
++		rtc_chan = keys_map_chan(keys_find_apid(RTC_PPID, KEYS_MAX_APIDS));
++	}
++	if (rtc_chan == 0) {
++		return false;
++	}
++	if (!keys_read(rtc_chan, RTC_CTRL, ctrl)) {
++		return false;
++	}
++	for (int attempt = 0; attempt < 3; attempt++) {
++		uint8_t b[4], again;
++		for (int i = 0; i < 4; i++) {
++			if (!keys_read(rtc_chan, (uint16_t)(RTC_RDATA0 + i), &b[i])) {
++				return false;
++			}
++		}
++		if (!keys_read(rtc_chan, RTC_RDATA0, &again)) {
++			return false;
++		}
++		if (again == b[0]) {    /* the Linux rollover check */
++			*secs = (uint32_t)b[0] | (uint32_t)b[1] << 8 |
++			    (uint32_t)b[2] << 16 | (uint32_t)b[3] << 24;
++			return true;
++		}
++	}
++	return false;
++}
++
++long
++tulip_rtc_gmt(void)
++{
++	uint32_t raw = 0;
++	uint8_t ctrl = 0;
++	int off = 0;
++	bool have_off = PE_parse_boot_argn("sweetrtcoff", &off, sizeof(off));
++
++	if (!tulip_rtc_read(&raw, &ctrl)) {
++		printf("TULIP RTC: PM660 RTC not readable; calendar from sweetrtc/0\n");
++		return 0;
++	}
++	if (!(ctrl & RTC_ENABLE)) {
++		printf("TULIP RTC: PM660 RTC disabled (ctrl 0x%02x, raw %u); not used\n", ctrl, raw);
++		return 0;
++	}
++	long gmt = 0;
++	if (have_off) {
++		gmt = (long)raw + off;
++	} else if (raw >= RTC_PLAUSIBLE_MIN) {
++		gmt = (long)raw;
++	}
++	printf("TULIP RTC: PM660 raw %u s (ctrl 0x%02x), sweetrtcoff %s%d -> %ld%s\n", raw, ctrl,
++	    have_off ? "" : "unset ", off, gmt,
++	    gmt ? "" : " (not Unix time: calendar from sweetrtc)");
++	return gmt;
++}
+ #endif /* ARM64_BOARD_CONFIG_SWEET */
+diff -U3 -r a/iokit/Kernel/IOPlatformExpert.cpp b/iokit/Kernel/IOPlatformExpert.cpp
+--- a/iokit/Kernel/IOPlatformExpert.cpp	2026-11-26 19:40:04.237301062 +0300
++++ b/iokit/Kernel/IOPlatformExpert.cpp	2026-11-26 19:40:04.237871810 +0300
+@@ -390,10 +390,22 @@
+ #endif
+ }
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++extern "C" long tulip_rtc_gmt(void);
++#define IOPE_GMT_HOOK tulip_rtc_gmt()
++#else
++#define IOPE_GMT_HOOK 0
++#endif
++
+ long
+ IOPlatformExpert::getGMTTimeOfDay(void)
+ {
+-	return 0;
++	/*
++	 * TULIP 0330: this used to return 0, so the calendar always started at
++	 * 1970 and every daemon scheduled against a wrong clock. Read the PM660
++	 * RTC through the SPMI arbiter instead.
++	 */
++	return IOPE_GMT_HOOK;
+ }
+ 
+ void
