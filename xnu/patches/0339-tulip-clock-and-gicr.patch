@@ -1,0 +1,156 @@
+diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c	2026-11-26 23:33:52.771270647 +0300
++++ b/bsd/dev/tulip_sdhci.c	2026-11-26 23:33:52.772388610 +0300
+@@ -5166,6 +5166,33 @@
+ 			}
+ 			{
+ 				/*
++				 * TULIP 0339: does each core's redistributor actually have
++				 * the timer PPI enabled?
++				 *
++				 * HB7 said four of the eight cores never take a timer
++				 * interrupt while PSCI reported all eight up. HB16 prints,
++				 * for every core, whether a redistributor was found and
++				 * prepared, what ISENABLER0 reads back after the write, the
++				 * WAKER state and what HPPIR0 has pending. A core with
++				 * seen=1 but enab without bit 30, or with CHILDRENASLEEP
++				 * still set in waker, is the one that is not being woken.
++				 */
++				extern volatile uint32_t tulip_gicr_seen[8], tulip_gicr_enab[8],
++				    tulip_gicr_waker[8], tulip_gicr_hppir[8];
++				unsigned c;
++
++				printf("TULIP HB16: gicr per cpu seen/enab/waker/hppir\n");
++				for (c = 0; c < 8; c++) {
++					printf("TULIP HB16:  cpu%u seen %u enab 0x%08x waker 0x%08x "
++					    "hppir 0x%08x%s\n", c, tulip_gicr_seen[c],
++					    tulip_gicr_enab[c], tulip_gicr_waker[c],
++					    tulip_gicr_hppir[c],
++					    (tulip_gicr_seen[c] && !(tulip_gicr_enab[c] & (1u << 30)))
++					    ? "  <-- no PPI30" : "");
++				}
++			}
++			{
++				/*
+ 				 * TULIP 0334: how each core leaves cpu_idle(). A core with
+ 				 * WFI near zero never sleeps at all; on eight cores that
+ 				 * hands the entire UI to whichever single core runs it,
+diff -U3 -r a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
+--- a/iokit/Kernel/arm/SweetCPU.cpp	2026-11-26 23:30:48.530374334 +0300
++++ b/iokit/Kernel/arm/SweetCPU.cpp	2026-11-26 23:32:42.604197257 +0300
+@@ -78,6 +78,20 @@
+ 	return 0;
+ }
+ 
++/*
++ * TULIP 0339: which core's redistributor actually has the timer PPI enabled?
++ *
++ * HB7 on the last boot read "timer irqs per cpu 7096 17 6248 0 580 0 0 0":
++ * four cores take timer interrupts and four take none, while HB5 says all
++ * eight were brought up by PSCI (calls 8, rej 0x0). Either their
++ * redistributors never got ISENABLER0 stamped, or the write went somewhere
++ * else. Record what each core reads back about itself so HB16 can say which.
++ */
++volatile uint32_t tulip_gicr_seen[8];    /* 1: a redistributor was found and prepared */
++volatile uint32_t tulip_gicr_enab[8];    /* GICR_ISENABLER0 read back after the write */
++volatile uint32_t tulip_gicr_waker[8];   /* GICR_WAKER after the wake */
++volatile uint32_t tulip_gicr_hppir[8];   /* GICR_HPPIR0: what the core itself sees pending */
++
+ /* Wake a redistributor and put its SGIs/PPIs in Group 1 at priority 0xA0, timers and IPI enabled. */
+ static void
+ vince_gicr_prepare(vm_offset_t rd)
+@@ -114,6 +128,19 @@
+ 	 */
+ 	*(volatile uint32_t *)(rd + GICR_ICENABLER0) = (1U << 30);
+ 	__builtin_arm_dsb(DSB_SY);
++
++	/*
++	 * TULIP 0339: read the redistributor back and remember it, keyed by the
++	 * core that is running this code (this only ever runs on a secondary).
++	 */
++	{
++		unsigned int c = (unsigned int)(getCPUNumber() & 7);
++
++		tulip_gicr_seen[c] = 1;
++		tulip_gicr_enab[c] = *(volatile uint32_t *)(rd + GICR_ISENABLER0);
++		tulip_gicr_waker[c] = *(volatile uint32_t *)(rd + GICR_WAKER);
++		tulip_gicr_hppir[c] = *(volatile uint32_t *)(rd + GICR_HPPIR0);
++	}
+ }
+ #endif /* VINCE_GIC_V3 */
+ 
+@@ -228,7 +255,27 @@
+ 	uint32_t target_mhz = 1401;
+ 	PE_parse_boot_argn("vincemhz", &target_mhz, sizeof(target_mhz));
+ 
++	/*
++	 * TULIP 0339: the addresses below were MSM8953's. SDM636 puts the two
++	 * APCS muxes somewhere else entirely, and HB12 has been reading the real
++	 * ones all along:
++	 *
++	 *   HB12: rcgr silver cmd 2 cfg 501 | gold cmd 2 cfg 501
++	 *
++	 * cfg 0x501 is src_sel 5 (A53 PLL) with divider 1, so both clusters are
++	 * already at 1401.6 MHz - the bootloader or an earlier boot set them and
++	 * this function has been writing to unmapped MSM8953 registers ever since,
++	 * which is why it never changed anything.
++	 *
++	 * Read the muxes where they actually live and, when they are not already
++	 * on the PLL, switch them. Nothing is written when cfg already reads 0x501
++	 * for a cluster, so a working clock is left exactly as it is.
++	 */
++#if defined(VINCE_TULIP)
++	vm_offset_t c0 = ml_io_map(0x17911000, 0x1000), c1 = ml_io_map(0x17811000, 0x1000);
++#else
+ 	vm_offset_t c0 = ml_io_map(0x0b111000, 0x1000), c1 = ml_io_map(0x0b011000, 0x1000);
++#endif
+ 	if (!c0 || !c1) {
+ 		IOLog("TULIP CLK: mux mapping failed\n");
+ 		return;
+@@ -237,6 +284,15 @@
+ 	volatile uint32_t *cmd0 = (volatile uint32_t *)(c0 + 0x50), *cfg0 = (volatile uint32_t *)(c0 + 0x54);
+ 	volatile uint32_t *cmd1 = (volatile uint32_t *)(c1 + 0x50), *cfg1 = (volatile uint32_t *)(c1 + 0x54);
+ 
++	/*
++	 * TULIP 0339: report what the muxes actually say before touching them.
++	 * HB12 shows the same two registers from the heartbeat, but only while
++	 * eMMC reads are happening; this line lands in the early boot log.
++	 */
++	IOLog("TULIP CLK: silver cmd %#x cfg %#x | gold cmd %#x cfg %#x\n",
++	    *cmd0, *cfg0, *cmd1, *cfg1);
++
++
+ 	if (target_mhz == 800) {
+ 		/* Fallback: keep GPLL0 800 MHz, align cluster 1 to cluster 0 */
+ 		*cfg1 = *cfg0;
+@@ -251,11 +307,30 @@
+ 		return;
+ 	}
+ 
++#if defined(VINCE_TULIP)
++	/*
++	 * TULIP 0339: SDM636 has no MSM8953 APCS A53 PLL at 0x0b116000. Both
++	 * clusters here run off GPLL0 (0x00100000) or the PLL the bootloader
++	 * configured, and HB12 shows they are already at the top rate. Do not
++	 * program a PLL that does not exist: report and keep what is there.
++	 */
++	{
++		uint32_t want = 0;
++
++		if (PE_parse_boot_argn("vincemhz", &want, sizeof(want)) && want) {
++			IOLog("TULIP CLK: vincemhz=%u ignored on SDM636; the APCS muxes "
++			    "above are the clock owners (HB12 shows the live rate)\n", want);
++		}
++	}
++	IOLog("TULIP CLK: leaving both clusters as the bootloader set them\n");
++	return;
++#else
+ 	vm_offset_t pll = ml_io_map(0x0b116000, 0x1000);
+ 	if (!pll) {
+ 		IOLog("TULIP CLK: PLL mapping failed\n");
+ 		return;
+ 	}
++#endif
+ 
+ 	uint32_t l_val = 73; /* default 1401.6 MHz */
+ 	if (target_mhz == 1036) {
