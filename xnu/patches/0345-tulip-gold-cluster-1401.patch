@@ -1,0 +1,185 @@
+diff -U3 -r a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
+--- a/iokit/Kernel/arm/SweetCPU.cpp	2026-11-27 02:49:59.984326156 +0300
++++ b/iokit/Kernel/arm/SweetCPU.cpp	2026-11-27 02:51:48.053075254 +0300
+@@ -248,6 +248,163 @@
+  * (Corner 2 ceiling is 860 mV).
+  * Switch both Cluster 0 (0x0b111050) and Cluster 1 (0x0b011050) to APCS A53 PLL (0x501).
+  */
++/*
++ * TULIP 0345: bring the Gold cluster (Kryo 260 A73) to 1401.6 MHz.
++ *
++ * HB6 reads "1382 1382 1382 1382 600 600 600 600": the four Silver cores sit
++ * near the top rate and the four Gold cores stay at 600 MHz. That is what the
++ * bootloader leaves behind - it raises the Silver PLL but hands the Gold mux to
++ * GPLL0 so a PSCI bring-up cannot overshoot a rail it has not voted for.
++ *
++ * This is the other half of "cpus=8 behaves like cpus=1": four cores are fast
++ * and four sit at 600, so the UI cannot use them and every boot task lands on
++ * the fast half.
++ *
++ * No voltage change is needed. Both clusters use L = 0x49 (73 x 19.2 MHz =
++ * 1401.6 MHz) at the same APM mode, and the Gold rail is already at Nominal,
++ * which covers 1401.6. Voltage only matters above 1.75 GHz.
++ *
++ * Silver is deliberately untouched: it is already there, and re-programming its
++ * PLL would mean parking CPU0 on GPLL0 first - a stall this code need not risk.
++ */
++#if defined(VINCE_TULIP)
++#define PERFCL_PLL_BASE   0x17816000u
++#define PWRCL_PLL_BASE    0x17916000u
++#define PERFCL_CMD_RCGR   0x17811050u
++#define PERFCL_CFG_RCGR   0x17811054u
++#define PERFCL_APM_CTL    0x179d0010u
++#define PWRCL_APM_CTL     0x179d0004u
++
++#define PLL_MODE          0x00u
++#define PLL_L_VAL         0x04u
++#define PLL_ALPHA_VAL     0x08u
++#define PLL_USER_CTL      0x0cu
++#define PLL_USER_CTL_U    0x10u
++#define PLL_CONFIG_CTL    0x14u
++#define PLL_TEST_CTL      0x18u
++
++#define PLL_OUTCTRL       (1u << 0)
++#define PLL_BYPASSNL      (1u << 1)
++#define PLL_RESET_N       (1u << 2)
++#define PLL_LOCK_DET      (1u << 31)
++
++/* 73 x 19.2 MHz = 1401.6 MHz; 0x41 -> 1248 MHz and 0x3a -> 1113.6 MHz are the
++ * steps down if a low-PVS Gold part turns out to be unhappy at the top. */
++#define GOLD_L_1401_6_MHZ 0x49u
++
++static void
++tulip_udelay_cntpct(uint32_t us)
++{
++	uint64_t start, now, ticks = (uint64_t)us * 192ull / 10ull;
++
++	__asm__ volatile ("isb; mrs %0, cntpct_el0" : "=r"(start));
++	for (;;) {
++		__asm__ volatile ("mrs %0, cntpct_el0" : "=r"(now));
++		if ((now - start) >= ticks) {
++			break;
++		}
++	}
++}
++
++static int
++tulip_switch_rcg(volatile uint32_t *cfg_reg, volatile uint32_t *cmd_reg, uint32_t target_cfg)
++{
++	uint32_t timeout = 500;
++
++	*cfg_reg = target_cfg;
++	__builtin_arm_dsb(DSB_SY);
++	*cmd_reg = *cmd_reg | 1u;
++	__builtin_arm_dsb(DSB_SY);
++	while (*cmd_reg & 1u) {
++		if (--timeout == 0) {
++			return -1;
++		}
++		tulip_udelay_cntpct(1);
++	}
++	return 0;
++}
++
++static void
++tulip_gold_cluster_1401(void)
++{
++	vm_offset_t pll_map, ref_map, rcg_map;
++	volatile uint32_t *pll, *ref, *cmd, *cfg;
++	uint32_t uctl, uctl_u, cctl, tctl, cfg_rcg, timeout = 500;
++
++	if (ml_get_topology_info() == NULL) {
++		return;
++	}
++	pll_map = ml_io_map(PERFCL_PLL_BASE, 0x1000);
++	ref_map = ml_io_map(PWRCL_PLL_BASE, 0x1000);
++	rcg_map = ml_io_map(PERFCL_CMD_RCGR & ~0xfffu, 0x1000);
++	if (pll_map == 0 || ref_map == 0 || rcg_map == 0) {
++		IOLog("TULIP CLK: gold cluster mapping failed\n");
++		return;
++	}
++	pll = (volatile uint32_t *)pll_map;
++	ref = (volatile uint32_t *)ref_map;
++	cmd = (volatile uint32_t *)(rcg_map + (PERFCL_CMD_RCGR & 0xfffu));
++	cfg = (volatile uint32_t *)(rcg_map + (PERFCL_CFG_RCGR & 0xfffu));
++
++	cfg_rcg = *cfg;
++	IOLog("TULIP CLK: gold before: cmd %#x cfg %#x pll mode %#x\n",
++	    *cmd, cfg_rcg, *(pll + (PLL_MODE / 4)));
++
++	/*
++	 * The Silver PLL is already locked at the target, so copy its divider
++	 * layout instead of guessing CONFIG_CTL / TEST_CTL / USER_CTL bytes.
++	 */
++	uctl = *(ref + (PLL_USER_CTL / 4)) & ~PLL_OUTCTRL;
++	uctl_u = *(ref + (PLL_USER_CTL_U / 4));
++	cctl = *(ref + (PLL_CONFIG_CTL / 4));
++	tctl = *(ref + (PLL_TEST_CTL / 4));
++
++	*(pll + (PLL_MODE / 4)) = 0;
++	tulip_udelay_cntpct(5);
++	*(pll + (PLL_USER_CTL / 4)) = uctl;
++	*(pll + (PLL_USER_CTL_U / 4)) = uctl_u;
++	*(pll + (PLL_CONFIG_CTL / 4)) = cctl;
++	*(pll + (PLL_TEST_CTL / 4)) = tctl;
++	*(pll + (PLL_L_VAL / 4)) = GOLD_L_1401_6_MHZ;
++	*(pll + (PLL_ALPHA_VAL / 4)) = 0;
++	__builtin_arm_dsb(DSB_SY);
++
++	*(pll + (PLL_MODE / 4)) = PLL_BYPASSNL;
++	tulip_udelay_cntpct(5);
++	*(pll + (PLL_MODE / 4)) = PLL_BYPASSNL | PLL_RESET_N;
++	while (!(*(pll + (PLL_MODE / 4)) & PLL_LOCK_DET)) {
++		if (--timeout == 0) {
++			IOLog("TULIP CLK: gold PLL lock failed (mode %#x)\n",
++			    *(pll + (PLL_MODE / 4)));
++			return;
++		}
++		tulip_udelay_cntpct(1);
++	}
++	*(pll + (PLL_USER_CTL / 4)) = uctl | PLL_OUTCTRL;
++	*(pll + (PLL_MODE / 4)) = PLL_BYPASSNL | PLL_RESET_N | PLL_OUTCTRL;
++	__builtin_arm_dsb(DSB_SY);
++
++	/* Match the Silver APM mode, then point the Gold mux at its own PLL. */
++	{
++		vm_offset_t apm = ml_io_map(PERFCL_APM_CTL & ~0xfffu, 0x1000);
++		vm_offset_t src = ml_io_map(PWRCL_APM_CTL & ~0xfffu, 0x1000);
++
++		if (apm != 0 && src != 0) {
++			*(volatile uint32_t *)(apm + (PERFCL_APM_CTL & 0xfffu)) =
++			    *(volatile uint32_t *)(src + (PWRCL_APM_CTL & 0xfffu));
++		}
++	}
++
++	/* src_sel 5 (the cluster PLL), divider 1 - the encoding HB12 shows. */
++	if (tulip_switch_rcg(cfg, cmd, 0x501u) != 0) {
++		IOLog("TULIP CLK: gold mux switch timed out\n");
++		return;
++	}
++	IOLog("TULIP CLK: gold after: cmd %#x cfg %#x (1401.6 MHz requested)\n",
++	    *cmd, *cfg);
++}
++#endif /* VINCE_TULIP */
++
+ static void
+ vince_cpu_clock_init(void)
+ {
+@@ -282,6 +439,17 @@
+ 		}
+ 	}
+ 	IOLog("TULIP CLK: leaving both clusters as the bootloader set them\n");
++	/*
++	 * TULIP 0345: raise the Gold cluster too, opt-in with tulipgold=1 until
++	 * the rate is proven on this part.
++	 */
++	{
++		uint32_t on = 0;
++
++		if (PE_parse_boot_argn("tulipgold", &on, sizeof(on)) && on) {
++			tulip_gold_cluster_1401();
++		}
++	}
+ 	return;
+ #else
+ 	vm_offset_t c0 = ml_io_map(0x0b111000, 0x1000), c1 = ml_io_map(0x0b011000, 0x1000);

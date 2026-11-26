@@ -1,6 +1,6 @@
 diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
 --- a/bsd/dev/tulip_sdhci.c	2026-11-27 02:22:41.164615620 +0300
-+++ b/bsd/dev/tulip_sdhci.c	2026-11-27 02:25:08.064765786 +0300
++++ b/bsd/dev/tulip_sdhci.c	2026-11-27 02:44:34.392038534 +0300
 @@ -707,7 +707,21 @@
  #define ADMA_ATTR_VALID         0x0001u
  #define ADMA_ATTR_END           0x0002u
@@ -129,7 +129,7 @@ diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
 +
 +	/* 1. BUS_WIDTH = 0x06, 8-bit DDR */
 +	error = sdhci_cmd(6, (EXT_CSD_ACCESS << 24) | (EXT_CSD_BUS_WIDTH << 16) |
-+	    (EXT_CSD_BW_8_DDR << 8),
++	    (EXT_CSD_BW_8_DDR << 8), 0,
 +	    SDHCI_CMD_RESP_SHORT_BUSY | SDHCI_CMD_CRC | SDHCI_CMD_INDEX, &r1);
 +	if (error) {
 +		printf("TULIP SDHCI: DDR52: CMD6 BUS_WIDTH=6 failed (%d)\n", error);
@@ -152,7 +152,7 @@ diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
 +		printf("TULIP SDHCI: DDR52: DAT0 never went high (PRESENT_STATE 0x%08x)\n", ps);
 +		return ETIMEDOUT;
 +	}
-+	error = sdhci_cmd(13, 0, SDHCI_CMD_RESP_SHORT, &r1);
++	error = sdhci_cmd(13, 0, 0, SDHCI_CMD_RESP_SHORT, &r1);
 +	if (error) {
 +		printf("TULIP SDHCI: DDR52: CMD13 failed (%d)\n", error);
 +		return error;
