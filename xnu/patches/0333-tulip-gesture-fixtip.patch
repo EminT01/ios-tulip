@@ -1,0 +1,46 @@
+diff -U3 -r a/iokit/Kernel/arm/hid/SweetHID.cpp b/iokit/Kernel/arm/hid/SweetHID.cpp
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp	2026-11-26 21:05:37.018802768 +0300
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp	2026-11-26 21:05:37.019304263 +0300
+@@ -607,24 +607,31 @@
+ 			continue;
+ 		}
+ 		/*
+-		 * TULIP 0327: a touch that starts at the edge has to look like an
+-		 * edge touch for its whole life, and UIKit reads more than one bit.
+-		 * 0071 in the sweet notes: EventMask 0xb0007 carries 0x800 (FromEdgeTip),
+-		 * 0x1000 (FromCorner) and 0x40000; without the corner and force bits a
+-		 * swipe up from the bottom is never recognised as the home gesture, so
+-		 * the widget editor on the lock screen cannot be left.
++		 * TULIP 0333: back to what whyred's 0071 does and proved to work -
++		 * a contact that starts in the edge band carries FromEdgeTip and
++		 * nothing else. 0327 also set FromCorner and the two force bits on
++		 * every edge contact; UIKit then saw a corner/force touch instead of
++		 * a plain bottom-edge swipe and the home gesture was never armed.
+ 		 */
+-		UInt32 mask = 0;
+-		if (fEdge[i]) {
+-			mask |= kIOHIDDigitizerEventFromEdgeTip | kIOHIDDigitizerEventFromCorner |
+-			    kIOHIDDigitizerEventFromEdgeForcePending | kIOHIDDigitizerEventFromEdgeForceActive;
+-		}
++		UInt32 mask = fEdge[i] ? kIOHIDDigitizerEventFromEdgeTip : 0;
+ 		if (i == finger) {
+ 			if (was != down) {
+ 				mask |= kIOHIDDigitizerEventTouch | kIOHIDDigitizerEventRange;
+ 			}
+ 			if (moved) {
+ 				mask |= kIOHIDDigitizerEventPosition;
++				/*
++				 * TULIP 0333: tell UIKit which way this contact is going.
++				 * It derives the swipe direction from the position deltas,
++				 * but the explicit bit is what arms the home gesture on a
++				 * contact that started at the bottom edge; without it a drag
++				 * out of the edge band reads as an ordinary drag.
++				 */
++				int32_t dy = ((int32_t)ny - (int32_t)fY[finger]) >> 8;
++				int32_t dx = ((int32_t)nx - (int32_t)fX[finger]) >> 8;
++				if (dy < 0 && -dy > (dx < 0 ? -dx : dx)) {
++					mask |= kIOHIDDigitizerEventSwipeUp;
++				}
+ 			}
+ 			if (!was && down) {
+ 				mask |= kIOHIDDigitizerEventIdentity;
