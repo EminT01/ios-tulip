@@ -1,0 +1,211 @@
+diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c	2026-11-27 02:22:41.164615620 +0300
++++ b/bsd/dev/tulip_sdhci.c	2026-11-27 02:25:08.064765786 +0300
+@@ -707,7 +707,21 @@
+ #define ADMA_ATTR_VALID         0x0001u
+ #define ADMA_ATTR_END           0x0002u
+ #define ADMA_ATTR_TRAN          0x0020u         /* Act = 10: transfer data */
+-#define ADMA_CHUNK              32768u          /* explicit length, < 64 KiB */
++/*
++ * TULIP 0344: the descriptor length field is 16 bits and the SDHCI spec caps
++ * one descriptor at 65536 bytes, so 32768 stays. But every chunk after the
++ * first must also be address aligned to ADMA2_CHUNK; keeping 32 KiB means the
++ * 4 MiB bounce buffer never needs a split.
++ */
++#define ADMA_CHUNK              32768u
++/* HC2 UHS mode select: 0x4 = DDR50 (SDHCI 3.0, bits 2:0) */
++#define SDHCI_CTRL2_DDR50       0x0004u
++/* HOST_CONTROL1 with ADMA2 selected: 8-bit (0x20) | HS (0x04) | ADMA2 (0x10) */
++#define SDHCI_CTRL_ADMA2_SEL    0x34u
++#define SDHCI_BLOCK_SIZE_ADMA   0x7200u         /* 512-byte block, 512 KiB boundary */
++/* EXT_CSD BUS_WIDTH values */
++#define EXT_CSD_BW_8_DDR        6u              /* 8-bit, dual data rate */
++#define EXT_CSD_BW_8            2u
+ #define ADMA_FAIL_LIMIT         3u
+ #define ADMA_TABLE_OFF          (BOUNCE_SIZE - 4096u)
+ #define ADMA_TEST_BLOCKS        256u            /* 128 KiB */
+@@ -729,6 +743,13 @@
+ #define SDHCI_CMD_RESP_LONG     0x01
+ #define SDHCI_CMD_RESP_SHORT    0x02
+ #define SDHCI_CMD_RESP_SHORT_BUSY 0x03
++/* TULIP 0344: PRESENT_STATE.DAT0 (bit 20) and the EXT_CSD access mode */
++#ifndef SDHCI_PS_DAT0
++#define SDHCI_PS_DAT0           0x00100000u
++#endif
++#ifndef EXT_CSD_ACCESS
++#define EXT_CSD_ACCESS          3u          /* EXT_CSD_CMD_SET_NORMAL */
++#endif
+ #define SDHCI_CMD_CRC            0x08
+ #define SDHCI_CMD_INDEX          0x10
+ #define SDHCI_CMD_DATA           0x20
+@@ -2076,22 +2097,42 @@
+ 		n++;
+ 		off += chunk;
+ 	}
+-	flush_dcache64((addr64_t)tulip_adma_tbl_pa, n * sizeof(*d), TRUE);
+-	flush_dcache64((addr64_t)pa, bytes, TRUE);
++	/*
++	 * TULIP 0344: flush_dcache64() is a no-op in this build. 0299 documents
++	 * why: it branches to flush_dcache(), and with __ARM_COHERENT_CACHE__ set
++	 * (Apple cores reset cache-coherent) that routine returns immediately.
++	 * 0338 flushed through it, so the descriptor table and the destination
++	 * stayed dirty in this core's cache, the controller read whatever was in
++	 * DRAM, and the transfer ended in ADMAERR + EIO with ADMA_ERR reading 0 -
++	 * exactly what the last boot showed.
++	 *
++	 * FlushPoC_DcacheRegion is the real DC CIVAC loop and takes a kernel
++	 * VIRTUAL address (0300 learned that the hard way: passing the PA walked
++	 * the low kernel map and died on a translation fault). Flush the
++	 * descriptor table by VA and the destination by VA.
++	 */
++	extern void FlushPoC_DcacheRegion(vm_offset_t va, size_t length);
++	FlushPoC_DcacheRegion((vm_offset_t)tulip_adma_tbl, n * sizeof(*d));
++	FlushPoC_DcacheRegion((vm_offset_t)(se.dma + DMA_BOUNCE + (pa - (se.dma_pa + DMA_BOUNCE))),
++	    bytes);
+ 	__asm__ volatile ("dsb sy" ::: "memory");
+ 
+ 	hc_wr(SDHCI_ADMA_SYS_ADDR, (uint32_t)tulip_adma_tbl_pa);
+ 	hc_wr(SDHCI_ADMA_SYS_ADDR_HI, (uint32_t)(tulip_adma_tbl_pa >> 32));
+ 	ctrl = hc_rd8(SDHCI_HOST_CONTROL);
++	/*
++	 * TULIP 0344: select ADMA2 and keep 8-bit + HS, i.e. 0x34, and program
++	 * BLOCK_SIZE with the 512 KiB boundary the descriptor table expects.
++	 */
+ 	hc_wr8(SDHCI_HOST_CONTROL,
+-	    (uint8_t)((ctrl & ~SDHCI_CTRL_DMA_MASK) | SDHCI_CTRL_ADMA2_32));
++	    (uint8_t)((ctrl & ~SDHCI_CTRL_DMA_MASK) | SDHCI_CTRL_ADMA2_SEL));
++	hc_wr(SDHCI_BLOCK_SIZE, (count << 16) | SDHCI_BLOCK_SIZE_ADMA);
+ 
+ 	if (index == 18 && count == 1) {
+ 		index = 17;
+ 	} else if (index == 17 && count > 1) {
+ 		index = 18;
+ 	}
+-	sdhci_set_block(count);
+ 
+ 	tr_mode = (uint16_t)(SDHCI_TRNS_DMA | SDHCI_TRNS_READ |
+ 	    SDHCI_TRNS_BLK_CNT_EN);
+@@ -2138,7 +2179,9 @@
+ 		sdhci_recover(index == 18);
+ 		return error;
+ 	}
+-	flush_dcache64((addr64_t)pa, bytes, TRUE);
++	/* TULIP 0344: invalidate by VA so the next read comes from DRAM */
++	FlushPoC_DcacheRegion((vm_offset_t)(se.dma + DMA_BOUNCE + (pa - (se.dma_pa + DMA_BOUNCE))),
++	    bytes);
+ 	ns = mach_absolute_time() - start;
+ 	absolutetime_to_nanoseconds(ns, &ns);
+ 	tulip_adma_reads++;
+@@ -4886,6 +4929,93 @@
+  * plausible. Repair with the one command that fits and re-check; each branch
+  * is logged, so the boot log says which state the hand-off was in.
+  */
++
++/*
++ * TULIP 0344: 8-bit DDR52.
++ *
++ * PIO tops out at about 6.5 MB/s on this board no matter what the bus does,
++ * because every 512-byte block costs a FIFO poll and 128 MMIO word reads. In
++ * single data rate the card only moves data on the rising edge, so even a
++ * perfect DMA path would stay at 50 MB/s. DDR52 samples both edges at the same
++ * 50 MHz, which doubles the ceiling to 100 MB/s - and it needs no tuning, no
++ * DLL and no HS200/HS400 machinery.
++ *
++ * Sequence (JESD84 / SDHCI 3.0):
++ *   1. CMD6 switch EXT_CSD[BUS_WIDTH] = 6 (8-bit DDR)   arg 0x03B70600
++ *   2. wait DAT0 high, then CMD13 until the card is in TRAN with no
++ *      SWITCH_ERROR
++ *   3. HOST_CONTROL2 UHS mode select = 0x4 (DDR50), 64-bit addressing stays 0
++ *   4. CMD8 SEND_EXT_CSD to prove the data path still moves a block
++ *
++ * Any failure leaves the single-rate 8-bit path alone: this only ever adds
++ * speed, never takes the boot with it.
++ */
++static int
++sdhci_enable_ddr52(void)
++{
++	uint32_t r1 = 0, ps = 0;
++	int error, i;
++
++	/* 1. BUS_WIDTH = 0x06, 8-bit DDR */
++	error = sdhci_cmd(6, (EXT_CSD_ACCESS << 24) | (EXT_CSD_BUS_WIDTH << 16) |
++	    (EXT_CSD_BW_8_DDR << 8),
++	    SDHCI_CMD_RESP_SHORT_BUSY | SDHCI_CMD_CRC | SDHCI_CMD_INDEX, &r1);
++	if (error) {
++		printf("TULIP SDHCI: DDR52: CMD6 BUS_WIDTH=6 failed (%d)\n", error);
++		return error;
++	}
++	if (r1 & 0x80u) {                       /* bit 7 = SWITCH_ERROR */
++		printf("TULIP SDHCI: DDR52: card rejected BUS_WIDTH=6 (R1 0x%08x)\n", r1);
++		return EIO;
++	}
++
++	/* 2. DAT0 high, then TRAN */
++	for (i = 0; i < 1000; i++) {
++		ps = hc_rd(SDHCI_PRESENT_STATE);
++		if (ps & SDHCI_PS_DAT0) {
++			break;
++		}
++		delay(1);
++	}
++	if (!(ps & SDHCI_PS_DAT0)) {
++		printf("TULIP SDHCI: DDR52: DAT0 never went high (PRESENT_STATE 0x%08x)\n", ps);
++		return ETIMEDOUT;
++	}
++	error = sdhci_cmd(13, 0, SDHCI_CMD_RESP_SHORT, &r1);
++	if (error) {
++		printf("TULIP SDHCI: DDR52: CMD13 failed (%d)\n", error);
++		return error;
++	}
++	if ((r1 & 0x80u) || ((r1 >> 9) & 0xfu) != 4u) {
++		printf("TULIP SDHCI: DDR52: card not in TRAN/SWITCH_ERROR (R1 0x%08x)\n", r1);
++		return EIO;
++	}
++
++	/* 3. HOST_CONTROL2: UHS mode = DDR50, 64-bit addressing stays off */
++	{
++		uint16_t hc2 = hc_rd16(SDHCI_HOST_CONTROL2);
++
++		hc2 &= (uint16_t)~0x7u;             /* clear UHS mode select */
++		hc2 |= SDHCI_CTRL2_DDR50;
++		hc2 &= (uint16_t)~(1u << 5);        /* 32-bit descriptor, not 64 */
++		hc_wr16(SDHCI_HOST_CONTROL2, hc2);
++		__asm__ volatile ("dsb sy" ::: "memory");
++		printf("TULIP SDHCI: DDR52: HOST_CONTROL2 0x%04x (UHS mode DDR50)\n",
++		    hc_rd16(SDHCI_HOST_CONTROL2));
++	}
++
++	/* 4. prove a block still moves */
++	error = sdhci_read_pio_once(8, 0, 1, (void *)(se.dma + DMA_BOUNCE));
++	if (error) {
++		printf("TULIP SDHCI: DDR52: CMD8 after the switch failed (%d), "
++		    "back to 8-bit single rate\n", error);
++		return error;
++	}
++	printf("TULIP SDHCI: DDR52 active: 8-bit, dual edge, 50 MHz, "
++	    "EXT_CSD read back clean\n");
++	return 0;
++}
++
+ static int
+ sdhci_restore_state(uint32_t *r1)
+ {
+@@ -6498,6 +6628,18 @@
+ 	tulip_sync_start();
+ 	/* TULIP 0295: vince_smd_start() never runs on tulip, so boot-arg vincetrace= was never read */
+ 	vince_bt_start();
++	/*
++	 * TULIP 0344: 8-bit DDR52 after the 50 MHz step and before anything else
++	 * touches the data path. Opt-in with tulipddr=1; single rate is untouched
++	 * when it is not given.
++	 */
++	{
++		int ddr = 0;
++
++		if (PE_parse_boot_argn("tulipddr", &ddr, sizeof(ddr)) && ddr) {
++			(void)sdhci_enable_ddr52();
++		}
++	}
+ 	/* TULIP 0338: ADMA2 descriptor table + self-test (boot-arg tulipadma=1) */
+ 	tulip_adma_init();
+ 	/* TULIP 0271: FTS touch probe (boot-arg touchprobe=1) */
