@@ -1,0 +1,93 @@
+diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c	2026-11-26 21:32:38.685890874 +0300
++++ b/bsd/dev/tulip_sdhci.c	2026-11-26 21:32:38.688212217 +0300
+@@ -5136,6 +5136,27 @@
+ 				}
+ 			}
+ 			{
++				/*
++				 * TULIP 0334: how each core leaves cpu_idle(). A core with
++				 * WFI near zero never sleeps at all; on eight cores that
++				 * hands the entire UI to whichever single core runs it,
++				 * which is the minute-long lag seen on the lock screen.
++				 */
++				extern volatile uint64_t tulip_idle_enter[8], tulip_idle_wfi[8],
++				    tulip_idle_arm0[8], tulip_idle_ast[8], tulip_idle_sigp[8];
++				unsigned c;
++
++				printf("TULIP HB14: idle loop per cpu enter/wfi/arm0/ast/sigp\n");
++				for (c = 0; c < 8; c++) {
++					printf("TULIP HB14:  cpu%u %llu / %llu / %llu / %llu / %llu\n", c,
++					    (unsigned long long)tulip_idle_enter[c],
++					    (unsigned long long)tulip_idle_wfi[c],
++					    (unsigned long long)tulip_idle_arm0[c],
++					    (unsigned long long)tulip_idle_ast[c],
++					    (unsigned long long)tulip_idle_sigp[c]);
++				}
++			}
++			{
+ 				extern volatile uint64_t tulip_irq_timer, tulip_irq_ipi, tulip_irq_other, tulip_irq_spur;
+ 				extern volatile uint32_t tulip_irq_lastother;
+ 
+diff -U3 -r a/osfmk/arm64/cpu.c b/osfmk/arm64/cpu.c
+--- a/osfmk/arm64/cpu.c	2026-11-26 21:32:38.684961484 +0300
++++ b/osfmk/arm64/cpu.c	2026-11-26 21:32:38.687405667 +0300
+@@ -585,7 +585,11 @@
+ 		 */
+ 		extern int tulip_soft_tick_due(void);
+ 		extern uint64_t tulip_soft_tick_arm(void);
++		extern volatile uint64_t tulip_idle_enter[8], tulip_idle_wfi[8], tulip_idle_arm0[8];
++		extern volatile uint64_t tulip_idle_ast[8], tulip_idle_sigp[8];
+ 		uint64_t wfi_deadline;
++
++		tulip_idle_enter[cpu_data_ptr->cpu_number & 7]++;
+ 		uint64_t tulip_idle_t0, tulip_idle_t1;
+ 		extern uint64_t tulip_idle_ticks[8], tulip_idle_wakes[8];
+ 
+@@ -595,6 +599,7 @@
+ 				rtclock_intr(TRUE);
+ 			}
+ 			if (__improbable(cpu_data_ptr->cpu_signal & SIGPdisabled)) {
++				tulip_idle_sigp[cpu_data_ptr->cpu_number & 7]++;
+ 				break;
+ 			}
+ 			/*
+@@ -604,12 +609,15 @@
+ 			 * test the returned bitmap directly.
+ 			 */
+ 			if (__improbable(*ast_pending() != 0)) {
++				tulip_idle_ast[cpu_data_ptr->cpu_number & 7]++;
+ 				break;
+ 			}
+ 			wfi_deadline = tulip_soft_tick_arm();
+ 			if (wfi_deadline == 0) {
++				tulip_idle_arm0[cpu_data_ptr->cpu_number & 7]++;
+ 				break;
+ 			}
++			tulip_idle_wfi[cpu_data_ptr->cpu_number & 7]++;
+ 			__builtin_arm_dsb(DSB_SY);
+ 			/*
+ 			 * TULIP 0322: time spent asleep in this WFI, per core, for HB11.
+diff -U3 -r a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+--- a/osfmk/arm64/sleh.c	2026-11-26 21:32:38.685544908 +0300
++++ b/osfmk/arm64/sleh.c	2026-11-26 21:32:38.686881054 +0300
+@@ -1872,6 +1872,19 @@
+  */
+ volatile uint64_t tulip_soft_ticks;
+ volatile uint64_t tulip_soft_tick_next;
++/*
++ * TULIP 0334: why do seven cores report zero idle time?
++ *
++ * HB11 showed "idle ms 74 0 0 0 0 0 0 0" on an 8/8 SMP boot: only the boot CPU
++ * was ever caught inside WFI. cpu_idle() has four ways out of its loop and a
++ * bare zero cannot tell "never scheduled" from "an AST was pending" from "the
++ * arm helper returned 0". Count them separately.
++ */
++volatile uint64_t tulip_idle_enter[8];   /* reached the soft-tick loop */
++volatile uint64_t tulip_idle_wfi[8];     /* WFI executed */
++volatile uint64_t tulip_idle_arm0[8];    /* tulip_soft_tick_arm() returned 0 */
++volatile uint64_t tulip_idle_ast[8];     /* left, AST pending */
++volatile uint64_t tulip_idle_sigp[8];    /* left, SIGPdisabled */
+ 
+ int
+ tulip_soft_tick_due(void)
