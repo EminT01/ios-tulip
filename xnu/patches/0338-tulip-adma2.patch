@@ -1,0 +1,297 @@
+diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c	2026-11-26 23:09:25.192517811 +0300
++++ b/bsd/dev/tulip_sdhci.c	2026-11-26 23:09:25.194480732 +0300
+@@ -686,6 +686,46 @@
+ #define SDHCI_TRNS_READ         0x0010
+ #define SDHCI_TRNS_MULTI        0x0020
+ 
++/*
++ * TULIP 0338: ADMA2 reads.
++ *
++ * Every block read on this board goes through SDMA or PIO because an early
++ * boot got ADMAERR on the first data command after CMD0 and the path was
++ * dropped. whyred - the same SDCC v5 core on the same SoC family - added
++ * ADMA2 in 0210 and ships it behind a self-test, with a 32-bit descriptor
++ * table that has to sit below 4 GiB.
++ *
++ * Here it is opt-in: tulipadma=1 turns it on and the default keeps the working
++ * SDMA/PIO path. The table lives in the last 4 KiB of the bounce buffer, which
++ * the kernel image provides and which is below 4 GiB; a table above that limit
++ * is a silent ADMAERR, the failure to avoid.
++ */
++#define SDHCI_ADMA_SYS_ADDR     0x58
++#define SDHCI_ADMA_SYS_ADDR_HI  0x5c
++#define SDHCI_ADMA_ERR          0x54
++#define SDHCI_CTRL_ADMA2_32     0x08u
++#define ADMA_ATTR_VALID         0x0001u
++#define ADMA_ATTR_END           0x0002u
++#define ADMA_ATTR_TRAN          0x0020u         /* Act = 10: transfer data */
++#define ADMA_CHUNK              32768u          /* explicit length, < 64 KiB */
++#define ADMA_FAIL_LIMIT         3u
++#define ADMA_TABLE_OFF          (BOUNCE_SIZE - 4096u)
++#define ADMA_TEST_BLOCKS        256u            /* 128 KiB */
++#define ADMA_TEST_LBA           0ull
++#define ADMA_TEST_TMP_OFF       0x100000ull     /* 1 MiB into the bounce buffer */
++
++struct tulip_adma2_desc {
++	uint16_t attr;
++	uint16_t len;
++	uint32_t addr;
++} __attribute__((packed));
++
++static volatile struct tulip_adma2_desc *tulip_adma_tbl;
++static uint64_t tulip_adma_tbl_pa;
++static bool tulip_adma_on;
++static uint32_t tulip_adma_fails;
++static uint64_t tulip_adma_reads, tulip_adma_bytes, tulip_adma_ns;
++
+ #define SDHCI_CMD_RESP_LONG     0x01
+ #define SDHCI_CMD_RESP_SHORT    0x02
+ #define SDHCI_CMD_RESP_SHORT_BUSY 0x03
+@@ -1150,6 +1190,9 @@
+  * after which the transfer never starts - no DATA_TIMEOUT, no DAT activity and
+  * CMD_INHIBIT stays set, which is exactly the wedge every boot shows.
+  */
++static int sdhci_read_pio_once(uint8_t index, uint32_t arg, uint32_t count, void *buf);
++static int sdhci_read_adma(uint8_t index, uint32_t arg, uint32_t count, uint64_t pa);
++
+ static inline void
+ sdhci_set_block(uint32_t count)
+ {
+@@ -1995,6 +2038,126 @@
+  * For multi-block reads (count > 1), CMD18 is used with AUTO_CMD12 so the
+  * host controller automatically terminates the streaming data transfer.
+  */
++
++/*
++ * TULIP 0338: one ADMA2 block read into a physical buffer.
++ *
++ * Descriptors are 32-bit ADMA2 (Act = 10, explicit length), chained in a table
++ * inside the bounce buffer. Both the table and the destination are flushed to
++ * memory before the controller is pointed at them - the SDCC core does not
++ * snoop the CPU caches.
++ */
++static int
++sdhci_read_adma(uint8_t index, uint32_t arg, uint32_t count, uint64_t pa)
++{
++	volatile struct tulip_adma2_desc *d = tulip_adma_tbl;
++	uint32_t bytes = count * SDHCI_BLOCK;
++	uint32_t n = 0, off = 0;
++	uint16_t tr_mode;
++	uint8_t ctrl;
++	uint32_t r1 = 0;
++	uint64_t start, deadline, ns;
++	int error;
++
++	if (!tulip_adma_on || d == NULL || count == 0 ||
++	    count > BOUNCE_SIZE / SDHCI_BLOCK || pa + bytes > 0x100000000ull) {
++		return EINVAL;
++	}
++	while (off < bytes) {
++		uint32_t chunk = bytes - off;
++
++		if (chunk > ADMA_CHUNK) {
++			chunk = ADMA_CHUNK;
++		}
++		d[n].attr = (uint16_t)(ADMA_ATTR_VALID | ADMA_ATTR_TRAN |
++		    ((off + chunk == bytes) ? ADMA_ATTR_END : 0));
++		d[n].len = (uint16_t)chunk;
++		d[n].addr = (uint32_t)(pa + off);
++		n++;
++		off += chunk;
++	}
++	flush_dcache64((addr64_t)tulip_adma_tbl_pa, n * sizeof(*d), TRUE);
++	flush_dcache64((addr64_t)pa, bytes, TRUE);
++	__asm__ volatile ("dsb sy" ::: "memory");
++
++	hc_wr(SDHCI_ADMA_SYS_ADDR, (uint32_t)tulip_adma_tbl_pa);
++	hc_wr(SDHCI_ADMA_SYS_ADDR_HI, (uint32_t)(tulip_adma_tbl_pa >> 32));
++	ctrl = hc_rd8(SDHCI_HOST_CONTROL);
++	hc_wr8(SDHCI_HOST_CONTROL,
++	    (uint8_t)((ctrl & ~SDHCI_CTRL_DMA_MASK) | SDHCI_CTRL_ADMA2_32));
++
++	if (index == 18 && count == 1) {
++		index = 17;
++	} else if (index == 17 && count > 1) {
++		index = 18;
++	}
++	sdhci_set_block(count);
++
++	tr_mode = (uint16_t)(SDHCI_TRNS_DMA | SDHCI_TRNS_READ |
++	    SDHCI_TRNS_BLK_CNT_EN);
++	if (index == 18) {
++		tr_mode |= SDHCI_TRNS_MULTI | SDHCI_TRNS_AUTO_CMD12;
++	}
++	tulip_data_moved = false;
++	tulip_sdma_active = false;
++	start = mach_absolute_time();
++	error = sdhci_cmd(index, arg, tr_mode,
++	    SDHCI_CMD_RESP_SHORT | SDHCI_CMD_CRC | SDHCI_CMD_INDEX |
++	    SDHCI_CMD_DATA, &r1);
++	if (!error) {
++		nanoseconds_to_deadline(DATA_TIMEOUT_NS, &deadline);
++		for (;;) {
++			uint32_t st = hc_rd(SDHCI_INT_STATUS);
++
++			if (st & (SDHCI_INT_ERR | SDHCI_INT_DATA_TIMEOUT |
++			    SDHCI_INT_DATA_CRC | SDHCI_INT_ADMAERR)) {
++				printf("TULIP SDHCI: ADMA2 failed: INT_STATUS 0x%08x "
++				    "ADMA_ERR 0x%08x ADMA_ADDR 0x%08x,%08x "
++				    "(%u blocks at LBA 0x%x)\n", st,
++				    hc_rd(SDHCI_ADMA_ERR),
++				    hc_rd(SDHCI_ADMA_SYS_ADDR_HI),
++				    hc_rd(SDHCI_ADMA_SYS_ADDR), count, arg);
++				hc_wr(SDHCI_INT_STATUS, st);
++				error = EIO;
++				break;
++			}
++			if (st & SDHCI_INT_TC) {
++				hc_wr(SDHCI_INT_STATUS, SDHCI_INT_TC);
++				break;
++			}
++			if (mach_absolute_time() >= deadline) {
++				sdhci_data_failure("ADMA2 block", st);
++				error = ETIMEDOUT;
++				break;
++			}
++		}
++	}
++	/* Leave HOST_CONTROL the way the PIO/SDMA paths expect it. */
++	hc_wr8(SDHCI_HOST_CONTROL, (uint8_t)(ctrl & ~SDHCI_CTRL_DMA_MASK));
++	if (error) {
++		sdhci_recover(index == 18);
++		return error;
++	}
++	flush_dcache64((addr64_t)pa, bytes, TRUE);
++	ns = mach_absolute_time() - start;
++	absolutetime_to_nanoseconds(ns, &ns);
++	tulip_adma_reads++;
++	tulip_adma_bytes += bytes;
++	tulip_adma_ns += ns ? ns : 1;
++	if (tulip_adma_reads <= 3 || (tulip_adma_reads % 2048) == 0) {
++		printf("TULIP SDHCI: ADMA2 read #%llu: %u blocks in %llu us; "
++		    "total %llu KiB in %llu ms = %llu KiB/s\n",
++		    (unsigned long long)tulip_adma_reads, count,
++		    (unsigned long long)(ns / 1000),
++		    (unsigned long long)(tulip_adma_bytes >> 10),
++		    (unsigned long long)(tulip_adma_ns / 1000000),
++		    (unsigned long long)((tulip_adma_bytes >> 10) *
++		    1000000000ull / tulip_adma_ns));
++	}
++	return 0;
++}
++
++
+ static int
+ sdhci_read_pio_once(uint8_t index, uint32_t arg, uint32_t count, void *buf)
+ {
+@@ -2154,6 +2317,66 @@
+  * the controller's DMA engine, so it is the path the hardware is known to
+  * complete even if this core never raises Buffer Read Ready for PIO.
+  */
++
++/*
++ * TULIP 0338: put the descriptor table in the bounce buffer's last 4 KiB and
++ * prove ADMA2 works before the filesystem trusts it.
++ */
++static void
++tulip_adma_init(void)
++{
++	int want = 0;
++	uint64_t dma_pa, tmp_pa;
++	char *pio_buf, *dma_buf;
++	uint32_t bytes = ADMA_TEST_BLOCKS * SDHCI_BLOCK;
++	int perr, derr;
++	bool same;
++
++	PE_parse_boot_argn("tulipadma", &want, sizeof(want));
++	if (!want) {
++		return;
++	}
++	if (se.dma == 0 || se.dma_pa == 0) {
++		printf("TULIP SDHCI: ADMA2 skipped, no bounce buffer\n");
++		return;
++	}
++	dma_pa = se.dma_pa + ADMA_TABLE_OFF;
++	if (dma_pa + 4096 > 0x100000000ull) {
++		printf("TULIP SDHCI: ADMA2 skipped, descriptor table at 0x%llx is "
++		    "above the 32-bit ADMA2 window\n", (unsigned long long)dma_pa);
++		return;
++	}
++	tulip_adma_tbl = (volatile struct tulip_adma2_desc *)(se.dma + ADMA_TABLE_OFF);
++	tulip_adma_tbl_pa = dma_pa;
++	tulip_adma_on = true;
++	printf("TULIP SDHCI: ADMA2 descriptor table at pa 0x%llx\n",
++	    (unsigned long long)dma_pa);
++
++	/*
++	 * Self-test: read the same 128 KiB twice, once through PIO and once
++	 * through ADMA2, into two halves of the bounce buffer, and compare.
++	 * Anything but byte-identical leaves ADMA2 off for the whole boot.
++	 */
++	pio_buf = (char *)(se.dma + DMA_BOUNCE);
++	dma_buf = (char *)(se.dma + ADMA_TEST_TMP_OFF);
++	tmp_pa = se.dma_pa + ADMA_TEST_TMP_OFF;
++	memset(dma_buf, 0x5a, bytes);
++
++	perr = sdhci_read_pio_once(18, (uint32_t)ADMA_TEST_LBA, ADMA_TEST_BLOCKS,
++	    pio_buf);
++	derr = sdhci_read_adma(18, (uint32_t)ADMA_TEST_LBA, ADMA_TEST_BLOCKS,
++	    tmp_pa);
++	same = (perr == 0 && derr == 0 && memcmp(pio_buf, dma_buf, bytes) == 0);
++	printf("TULIP SDHCI: ADMA2 self-test: PIO %d, ADMA2 %d, data %s\n",
++	    perr, derr, same ? "IDENTICAL" : "DIFFERENT");
++	if (!same) {
++		tulip_adma_on = false;
++		printf("TULIP SDHCI: ADMA2 read path left OFF (self-test failed)\n");
++		return;
++	}
++	printf("TULIP SDHCI: ADMA2 read path ON\n");
++}
++
+ static int
+ sdhci_read_sdma(uint8_t index, uint32_t arg, uint32_t count, uint64_t pa)
+ {
+@@ -5018,6 +5241,25 @@
+ 	perf_t0 = mach_absolute_time();
+ 	tulip_perf_emmc_reads++;
+ 	tulip_perf_emmc_blocks += count;
++	/*
++	 * TULIP 0338: ADMA2 first when it is on and the block lands in the
++	 * bounce buffer. Any failure counts towards ADMA_FAIL_LIMIT and drops
++	 * the whole boot back to SDMA/PIO.
++	 */
++	if (tulip_adma_on && buf == (void *)(se.dma + DMA_BOUNCE)) {
++		error = sdhci_read_adma(count == 1 ? 17 : 18, (uint32_t)lba,
++		    count, se.dma_pa + DMA_BOUNCE);
++		if (error == 0) {
++			tulip_adma_fails = 0;
++			goto read_done;
++		}
++		if (++tulip_adma_fails >= ADMA_FAIL_LIMIT) {
++			tulip_adma_on = false;
++			printf("TULIP SDHCI: ADMA2 read path left OFF after %u "
++			    "failures; falling back to SDMA/PIO\n",
++			    tulip_adma_fails);
++		}
++	}
+ 	for (int attempt = 1;; attempt++) {
+ 		error = sdhci_read_pio(count == 1 ? 17 : 18, (uint32_t)lba,
+ 		    count, buf);
+@@ -5036,6 +5278,7 @@
+ 		/* 1, 2, 4, 8 ms: short enough to hide, long enough to settle */
+ 		delay(TULIP_IO_RETRY_DELAY_US << attempt);
+ 	}
++read_done:
+ 	tulip_perf_emmc_ticks += mach_absolute_time() - perf_t0;
+ 	{
+ 		/* TULIP 0274: heartbeat every 20 s from the disk path (needs no timer sleep) */
+@@ -6216,6 +6459,8 @@
+ 	tulip_sync_start();
+ 	/* TULIP 0295: vince_smd_start() never runs on tulip, so boot-arg vincetrace= was never read */
+ 	vince_bt_start();
++	/* TULIP 0338: ADMA2 descriptor table + self-test (boot-arg tulipadma=1) */
++	tulip_adma_init();
+ 	/* TULIP 0271: FTS touch probe (boot-arg touchprobe=1) */
+ 	tulip_touch_start();
+ 	/*
