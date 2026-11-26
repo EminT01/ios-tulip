@@ -1,0 +1,56 @@
+diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c	2026-11-27 01:27:14.605653899 +0300
++++ b/bsd/dev/tulip_sdhci.c	2026-11-27 01:27:14.608581588 +0300
+@@ -5448,6 +5448,52 @@
+ 			}
+ 			{
+ 				/*
++				 * TULIP 0343: how wide is the bus, really, and how fast?
++				 *
++				 * PERF says "eMMC 49663 ms (5674 reads, 324 MiB)" - 324 MiB in
++				 * 50 s is 6.5 MB/s. A 50 MHz 8-bit bus moves about 50 MB/s, a
++				 * 4-bit one about 25, and 1-bit about 6.25. The measured rate
++				 * is the 1-bit number, so either the width switch never took
++				 * or the host is reading back a width the card is not using.
++				 *
++				 * HB17 prints the three registers that decide it plus the rate
++				 * the counters actually saw:
++				 *   HC_HOST  HOST_CONTROL (bits 5:4 = 8/4-bit, bit 0 = LED only)
++				 *   HC2      HOST_CONTROL2 UHS/timing
++				 *   EXT_CSD  BUS_WIDTH byte 183 of the card's EXT_CSD
++				 *   rate     MiB/s from the perf counters since boot
++				 * A card in 8-bit and a host in 4-bit (or the reverse) is the
++				 * failure this is looking for.
++				 */
++				{
++					extern uint64_t tulip_perf_emmc_ticks, tulip_perf_emmc_blocks;
++					uint64_t blocks = tulip_perf_emmc_blocks;
++					uint64_t ticks = tulip_perf_emmc_ticks;
++					uint64_t kib_per_s = 0;
++
++					if (ticks != 0) {
++						/* blocks are 512 bytes; ticks are absolute time */
++						uint64_t ns = 0;
++
++						absolutetime_to_nanoseconds(ticks, &ns);
++						if (ns != 0) {
++							kib_per_s = (blocks / 2) * 1000000000ULL / ns;
++						}
++					}
++					printf("TULIP HB17: HC_HOST 0x%02x HC2 0x%04x "
++					    "width_host %s clocks 0x%04x rate %llu KiB/s "
++					    "(%llu blocks, %llu ms)\n",
++					    hc_rd8(SDHCI_HOST_CONTROL), hc_rd16(SDHCI_HOST_CONTROL2),
++					    (hc_rd8(SDHCI_HOST_CONTROL) & SDHCI_CTRL_8BITBUS) ? "8-bit" :
++					    ((hc_rd8(SDHCI_HOST_CONTROL) & SDHCI_CTRL_4BITBUS) ? "4-bit" : "1-bit"),
++					    hc_rd16(SDHCI_CLOCK_CONTROL),
++					    (unsigned long long)kib_per_s,
++					    (unsigned long long)blocks,
++					    (unsigned long long)(((ticks * 1000ULL) / 19200000ULL)));
++				}
++			}
++			{
++				/*
+ 				 * TULIP 0334: how each core leaves cpu_idle(). A core with
+ 				 * WFI near zero never sleeps at all; on eight cores that
+ 				 * hands the entire UI to whichever single core runs it,
