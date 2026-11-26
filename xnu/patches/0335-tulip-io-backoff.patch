@@ -1,0 +1,83 @@
+diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c	2026-11-26 21:52:16.445983571 +0300
++++ b/bsd/dev/tulip_sdhci.c	2026-11-26 21:52:16.448129166 +0300
+@@ -1348,23 +1348,44 @@
+ static int
+ sdhci_poll_state(uint32_t mask, uint64_t timeout_ns)
+ {
+-	uint64_t deadline;
++	uint64_t deadline, start, elapsed;
+ 	uint32_t spins = 0;
+ 
+ 	nanoseconds_to_absolutetime(timeout_ns, &deadline);
+-	deadline += mach_absolute_time();
++	start = mach_absolute_time();
++	deadline += start;
+ 	while (hc_rd(SDHCI_PRESENT_STATE) & mask) {
+-		if (mach_absolute_time() > deadline) {
++		uint64_t now = mach_absolute_time();
++
++		if (now > deadline) {
+ 			return ETIMEDOUT;
+ 		}
+ 		/*
+ 		 * TULIP 0308: CMD_INHIBIT/DATA_INHIBIT normally clear within a
+ 		 * handful of polls, so the microsecond of busy-wait per spin is
+-		 * pure overhead for every command this driver issues. Only back off
+-		 * once the state machine is clearly slow.
++		 * pure overhead for every command this driver issues.
++		 *
++		 * TULIP 0335: and once the state machine is clearly slow, a fixed
++		 * 1 ms delay(1) per spin is the wrong shape too - a wait that ends
++		 * 30 us after the delay started still burns the whole millisecond.
++		 * Spin hard for the first stretch (0069's CMD_SPIN_NS idea), then
++		 * step the backoff up as the wait grows, so a genuinely slow
++		 * command costs fractions of a millisecond instead of one per poll.
+ 		 */
+-		if (++spins > 64) {
+-			delay(1);
++		spins++;
++		if (spins > 64) {
++			uint32_t us;
++
++			absolutetime_to_nanoseconds(now - start, &elapsed);
++			elapsed /= NSEC_PER_USEC;       /* microseconds waited so far */
++			if (elapsed < 500) {
++				us = 50;
++			} else if (elapsed < 5000) {
++				us = 200;
++			} else {
++				us = 1000;
++			}
++			delay(us);
+ 		}
+ 	}
+ 	return 0;
+@@ -4957,8 +4978,15 @@
+  * exited. Retry the already-recovered controller a few times before giving
+  * up; a short delay lets a clock-cycle recovery settle.
+  */
+-#define TULIP_IO_RETRIES        3
+-#define TULIP_IO_RETRY_DELAY_US 2000
++/*
++ * TULIP 0335: a single transient data-phase timeout used to cost the caller
++ * the block outright (0179 in whyred needed three retries for exactly this on
++ * the root device, where dyld maps the shared cache during boot). Five
++ * attempts with a growing pause ride out a busy controller without making a
++ * genuinely dead card take five times as long.
++ */
++#define TULIP_IO_RETRIES        5
++#define TULIP_IO_RETRY_DELAY_US 1000
+ 
+ /* TULIP 0251: eMMC read cost counters, printed by bsd/dev/sweet_sample.c */
+ uint64_t tulip_perf_emmc_ticks, tulip_perf_emmc_reads, tulip_perf_emmc_blocks;
+@@ -5005,7 +5033,8 @@
+ 			    TULIP_IO_RETRIES);
+ 		}
+ 		tulip_wait_card_tran();
+-		delay(TULIP_IO_RETRY_DELAY_US);
++		/* 1, 2, 4, 8 ms: short enough to hide, long enough to settle */
++		delay(TULIP_IO_RETRY_DELAY_US << attempt);
+ 	}
+ 	tulip_perf_emmc_ticks += mach_absolute_time() - perf_t0;
+ 	{
