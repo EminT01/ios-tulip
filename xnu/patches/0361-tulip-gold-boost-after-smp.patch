@@ -1,0 +1,43 @@
+diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c	2026-11-28 01:46:10.338381716 +0300
++++ b/bsd/dev/tulip_sdhci.c	2026-11-28 02:09:19.296621235 +0300
+@@ -5812,15 +5812,36 @@
+ 					 * reports them. tulipgold=1 opts in; without it the
+ 					 * cluster stays on GPLL0 exactly as the ABL left it.
+ 					 */
++					/*
++					 * TULIP 0361: run the Gold boost unconditionally, and only
++					 * once all eight cores are running.
++					 *
++					 * 0350 gated this on tulipgold=1, which was never in the
++					 * boot args, so every boot so far kept the Gold cluster at
++					 * the bootloader's L = 0x20 (614.4 MHz) - HB9 said so every
++					 * time. It also ran here, before PSCI had brought the
++					 * secondaries up, so a PSCI CPU_ON that re-locks the Gold
++					 * PLL would have undone it anyway.
++					 *
++					 * TCS(0x40) is set by initCPU() once a core is running, so
++					 * wait for all eight to reach it.
++					 */
+ 					{
+ 						extern void tulip_boost_gold_pll(void);
++						extern volatile uint32_t tulip_cpu_stage[8];
+ 						static int gold_done;
+ 
+ 						if (!gold_done) {
+-							int on = 0;
++							unsigned int ready = 0, c;
+ 
+-							gold_done = 1;
+-							if (PE_parse_boot_argn("tulipgold", &on, sizeof(on)) && on) {
++							for (c = 0; c < 8; c++) {
++								if (tulip_cpu_stage[c] & 0x40) {
++									ready++;
++								}
++							}
++							if (ready == 8) {
++								gold_done = 1;
++								printf("TULIP CLK: all 8 cores running, boosting gold\n");
+ 								tulip_boost_gold_pll();
+ 							}
+ 						}
