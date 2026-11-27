@@ -1,0 +1,27 @@
+diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -20,19 +20,20 @@
+ 					unsigned i, pass;
+ 
+ 					tulip_bench_done = 1;
+-					__asm__ volatile ("isb; mrs %0, cntpct_el0" : "=r"(t0));
++					/* TULIP 0353: cntpct_el0 is garbage here (HB13); mach time matches a stopwatch */
++					t0 = mach_absolute_time();
+ 					for (i = 0; i < 20000000; i++) {
+ 						x = x * 3 + i;
+ 						__asm__ volatile ("" : "+r"(x));
+ 					}
+-					__asm__ volatile ("isb; mrs %0, cntpct_el0" : "=r"(t1));
++					t1 = mach_absolute_time();
+ 					for (pass = 0; pass < 8; pass++) {
+ 						for (i = 0; i < 512 * 1024; i++) {
+ 							sum += tulip_bench_buf[i] + i;
+ 							tulip_bench_buf[i] = sum;
+ 						}
+ 					}
+-					__asm__ volatile ("isb; mrs %0, cntpct_el0" : "=r"(t2));
++					t2 = mach_absolute_time();
+ 					printf("TULIP HB11: bench alu 20M steps %llu us (x %llu), mem 32 MiB rd+wr %llu us (sum %llu)\n",
+ 					    (t1 - t0) * 1000 / 19200, x & 1, (t2 - t1) * 1000 / 19200, sum & 1);
+ 				}
