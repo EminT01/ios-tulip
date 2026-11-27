@@ -1,0 +1,49 @@
+diff -U3 -r a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -53,18 +53,19 @@
+ tulip_clk_wr32(vm_offset_t base, uint32_t off, uint32_t val)
+ {
+ 	*(volatile uint32_t *)(base + off) = val;
+-	__builtin_arm_dsb(DSB_SY);
++	__asm__ volatile ("dsb sy" ::: "memory");
+ }
+ 
++/*
++ * TULIP 0352: cntpct_el0 is not a usable clock here (HB13: it sits still or
++ * jumps), so a spin on it can hang forever. delay() uses mach time.
++ */
++extern "C" void delay(int usec);
++
+ static void
+ tulip_clk_udelay(uint32_t us)
+ {
+-	uint64_t start, now, ticks = ((uint64_t)us * 192ull) / 10ull;
+-
+-	__asm__ volatile ("isb; mrs %0, cntpct_el0" : "=r"(start));
+-	do {
+-		__asm__ volatile ("isb; mrs %0, cntpct_el0" : "=r"(now));
+-	} while ((now - start) < ticks);
++	delay((int)us);
+ }
+ 
+ static int
+@@ -84,7 +85,8 @@
+ 	return 0;
+ }
+ 
+-void
++/* TULIP 0352: called from bsd/dev/tulip_sdhci.c (C), so C linkage */
++extern "C" void
+ tulip_boost_gold_pll(void)
+ {
+ 	static int done;
+@@ -157,7 +159,7 @@
+ 
+ 	IOLog("TULIP CLK: gold boosted L=%#x (%u MHz) cfg %#x\n",
+ 	    tulip_clk_rd32(perf, APCS_PLL_L_VAL),
+-	    (unsigned)(19.2 * (tulip_clk_rd32(perf, APCS_PLL_L_VAL) & 0xffu)),
++	    (unsigned)(((tulip_clk_rd32(perf, APCS_PLL_L_VAL) & 0xffu) * 192u) / 10u), /* no FP in the kernel */
+ 	    tulip_clk_rd32(perf, APCS_CFG_RCGR));
+ }
+ 
