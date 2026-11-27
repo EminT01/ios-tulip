@@ -1,0 +1,74 @@
+diff -U3 -r a/iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp b/iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp
+--- a/iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp	2026-11-28 00:08:15.733736835 +0300
++++ b/iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp	2026-11-28 00:07:38.952012812 +0300
+@@ -646,10 +646,16 @@
+             static unsigned enq_log;
+ 
+             if (enq_log < 20 || (enq_log % 64) == 0) {
++                /*
++                 * TULIP 0359: _queuePort is a mach_port_t (unsigned int) already,
++                 * so the cast 0356 wrote is pointless and clang rejects it with
++                 * "cast from pointer to smaller type 'unsigned int' loses
++                 * information" on this target. Print the value as-is.
++                 */
+                 IOLog("TULIP HID: enqueue type %d -> %s (events %llu, dropped %llu, port %u)\n",
+                     (int)event->getType(), result ? "ok" : "FAILED",
+                     (unsigned long long)_eventCount, (unsigned long long)_droppedEventCount,
+-                    (unsigned)_queuePort);
++                    (uint32_t)_queuePort);
+             }
+             enq_log++;
+         }
+diff -U3 -r a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+--- a/osfmk/arm64/sleh.c	2026-11-27 23:56:41.780855213 +0300
++++ b/osfmk/arm64/sleh.c	2026-11-28 00:04:30.295764402 +0300
+@@ -889,6 +889,29 @@
+ 
+ 	COPYIN(get_saved_state_pc(state), (char *)&instr, sizeof(instr));
+ 
++	/*
++	 * TULIP 0357: count user traps and separate the LSE atomics from
++	 * everything else. A user instruction that reached this point cannot be
++	 * executed by this core, and on this SoC the overwhelming majority are
++	 * the ARMv8.2 atomics. Bin them by their opcode's top nibble so HB19 can
++	 * show a short histogram instead of one number.
++	 */
++	if (PSR64_IS_USER64(get_saved_state_cpsr(state))) {
++		bool is_lse = ((instr & 0x3f200c00u) == 0x38200000u) ||   /* CAS*  */
++		    ((instr & 0x3f200c00u) == 0x38200800u) ||             /* LDADD/SWP */
++		    ((instr & 0xfffffc00u) == 0xdac00000u) ||             /* LDAPR (8.3) */
++		    ((instr & 0xffe0fc00u) == 0x3820fc00u);               /* STADD etc. */
++
++		if (is_lse) {
++			tulip_lse_traps++;
++			tulip_lse_last_instr = instr;
++			tulip_lse_hist[(instr >> 28) & 0xf]++;
++		} else {
++			tulip_undef_traps++;
++			tulip_undef_last_instr = instr;
++		}
++	}
++
+ #if CONFIG_DTRACE
+ 
+ 	if (PSR64_IS_USER64(get_saved_state_cpsr(state))) {
+@@ -1847,6 +1870,19 @@
+ 	__builtin_unreachable();
+ }
+ 
++/*
++ * TULIP 0359: the undefined-instruction counters belong here, above the
++ * function that increments them. 0357 declared them next to the interrupt
++ * counters, which sit 1000 lines below handle_uncategorized(), so the
++ * definitions did not exist yet when the increment was compiled and sleh.c
++ * failed with "use of undeclared identifier 'tulip_lse_traps'".
++ */
++volatile uint64_t tulip_lse_traps;      /* user instructions this core cannot run */
++volatile uint32_t tulip_lse_last_instr; /* the last one */
++volatile uint32_t tulip_lse_hist[16];   /* top nibble of the opcode */
++volatile uint64_t tulip_undef_traps;    /* everything else */
++volatile uint32_t tulip_undef_last_instr;
++
+ /* TULIP 0279: interrupt counters shown by the TULIP HB2 line */
+ volatile uint64_t tulip_irq_timer, tulip_irq_ipi, tulip_irq_other, tulip_irq_spur;
+ volatile uint64_t tulip_storm[10];   /* TULIP 0311: timer state captured on the first CPU to reach 200000 timer irqs */
