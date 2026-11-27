@@ -1,0 +1,38 @@
+diff -U3 -r a/iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp b/iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp
+--- a/iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp
++++ b/iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp
+@@ -608,6 +608,12 @@
+                                 IOOptionBits                    options __unused)
+ {
+     if (!_queue || _state != kUserClientStateOpen) {
++        static unsigned dropped_log;
++
++        /* TULIP 0356: an event reached a client that cannot take it */
++        if (dropped_log++ < 20) {
++            IOLog("TULIP HID: event dropped, queue %p state %d\n", _queue, (int)_state);
++        }
+         return;
+     }
+ 
+@@ -632,6 +638,21 @@
+         _lastEventTime = mach_continuous_time();
+         _lastEventType = event->getType();
+         Boolean result = _queue->enqueueEvent(event);
++        {
++            /*
++             * TULIP 0356: does the event get into the queue, and has backboardd
++             * given us a mach port to wake it with? First 20, then every 64th.
++             */
++            static unsigned enq_log;
++
++            if (enq_log < 20 || (enq_log % 64) == 0) {
++                IOLog("TULIP HID: enqueue type %d -> %s (events %llu, dropped %llu, port %u)\n",
++                    (int)event->getType(), result ? "ok" : "FAILED",
++                    (unsigned long long)_eventCount, (unsigned long long)_droppedEventCount,
++                    (unsigned)_queuePort);
++            }
++            enq_log++;
++        }
+         if (result == false) {
+             _lastDroppedEventTime = _lastEventTime;
+             ++_droppedEventCount;

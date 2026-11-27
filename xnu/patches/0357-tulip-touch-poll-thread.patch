@@ -1,0 +1,49 @@
+diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -445,8 +445,30 @@
+ };
+ 
+ void tulip_touch_poll(void);
+-void
+-tulip_touch_poll(void)
++static void tulip_touch_poll_inner(void);
++
++/*
++ * TULIP 0357: tulip_touch_poll() was only ever called from the eMMC read path,
++ * so the touch panel was sampled while the disk was busy (boot) and never once
++ * the lock screen was up and the disk went quiet. A kernel thread now polls it
++ * too (see tulip_touch_nvt_thread), and this wrapper keeps the two callers from
++ * running the I2C bit-bang at the same time.
++ */
++void
++tulip_touch_poll(void)
++{
++	static volatile int busy;
++
++	if (!__sync_bool_compare_and_swap(&busy, 0, 1)) {
++		return;
++	}
++	tulip_touch_poll_inner();
++	__sync_synchronize();
++	busy = 0;
++}
++
++static void
++tulip_touch_poll_inner(void)
+ {
+ 	static uint64_t next_ns;
+ 	static uint8_t last[8][8];
+@@ -560,4 +590,12 @@
+ 	tulip_nvt[13] = 4;
+ 	sweet_console_muted = muted;
+ 	tt_ready = (found > 0);
++	/*
++	 * TULIP 0357: keep polling for as long as the system is up. 15 ms is the poll's
++	 * own rate limit; a 10 ms nap (one tick) gets us within a tick of that.
++	 */
++	while (tt_ready) {
++		tulip_touch_poll();
++		tt_nap(hz / 100 ? hz / 100 : 1);
++	}
+ }

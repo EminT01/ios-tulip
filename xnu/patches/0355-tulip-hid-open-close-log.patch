@@ -1,0 +1,38 @@
+diff -U3 -r a/iokit/Kernel/arm/hid/SweetHID.cpp b/iokit/Kernel/arm/hid/SweetHID.cpp
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -145,6 +145,7 @@
+ 	bool ok = false;
+ 
+ 	if (!data) {
++		IOLog("TULIP HID: %s open from %p refused (no client data)\n", getName(), client);
+ 		return false;
+ 	}
+ 	IOLockLock(_clientLock);
+@@ -160,6 +161,9 @@
+ 		}
+ 	}
+ 	IOLockUnlock(_clientLock);
++	/* TULIP 0355: who connects to the HID service, and does it stay connected */
++	IOLog("TULIP HID: %s open from %p -> %s (%u clients)\n", getName(), client,
++	    ok ? "ok" : "refused", _clients ? _clients->getCount() : 0);
+ 	return ok;
+ }
+ 
+@@ -179,6 +183,8 @@
+ 		_clients = next;
+ 	}
+ 	IOLockUnlock(_clientLock);
++	IOLog("TULIP HID: %s close from %p (%u clients)\n", getName(), client,
++	    _clients ? _clients->getCount() : 0);
+ }
+ 
+ bool
+@@ -317,6 +323,7 @@
+ 		client->release();
+ 		return kIOReturnUnsupported;
+ 	}
++	IOLog("TULIP HID: %s user client created for task %p\n", getName(), owningTask);
+ 	*handler = client;
+ 	return kIOReturnSuccess;
+ }
