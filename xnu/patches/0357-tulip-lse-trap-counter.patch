@@ -1,0 +1,92 @@
+diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c	2026-11-27 22:47:51.831987777 +0300
++++ b/bsd/dev/tulip_sdhci.c	2026-11-27 22:47:51.834721321 +0300
+@@ -5640,6 +5640,28 @@
+ 			}
+ 			{
+ 				/*
++				 * TULIP 0357: how many user instructions did the kernel have
++				 * to emulate, and how many of them were LSE atomics?
++				 *
++				 * The iPhone X userland targets ARMv8.2; this core is
++				 * ARMv8.0 and traps on every CASA / LDADD / SWP / LDAPR. If
++				 * the LSE counter climbs into the millions during boot, those
++				 * traps - not the eMMC and not the clocks - are what the boot
++				 * spends its time on.
++				 */
++				extern volatile uint64_t tulip_lse_traps, tulip_undef_traps;
++				extern volatile uint32_t tulip_lse_last_instr, tulip_undef_last_instr;
++				extern volatile uint32_t tulip_lse_hist[16];
++
++				printf("TULIP HB19: lse %llu (last %#x) other-undef %llu (last %#x) "
++				    "hist %u %u %u %u %u %u %u %u\n",
++				    (unsigned long long)tulip_lse_traps, tulip_lse_last_instr,
++				    (unsigned long long)tulip_undef_traps, tulip_undef_last_instr,
++				    tulip_lse_hist[0], tulip_lse_hist[1], tulip_lse_hist[2], tulip_lse_hist[3],
++				    tulip_lse_hist[4], tulip_lse_hist[5], tulip_lse_hist[6], tulip_lse_hist[7]);
++			}
++			{
++				/*
+ 				 * TULIP 0339: does each core's redistributor actually have
+ 				 * the timer PPI enabled?
+ 				 *
+diff -U3 -r a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+--- a/osfmk/arm64/sleh.c	2026-11-27 22:47:51.828342050 +0300
++++ b/osfmk/arm64/sleh.c	2026-11-27 22:47:51.833147400 +0300
+@@ -889,6 +889,29 @@
+ 
+ 	COPYIN(get_saved_state_pc(state), (char *)&instr, sizeof(instr));
+ 
++	/*
++	 * TULIP 0357: count user traps and separate the LSE atomics from
++	 * everything else. A user instruction that reached this point cannot be
++	 * executed by this core, and on this SoC the overwhelming majority are
++	 * the ARMv8.2 atomics. Bin them by their opcode's top nibble so HB19 can
++	 * show a short histogram instead of one number.
++	 */
++	if (PSR64_IS_USER64(get_saved_state_cpsr(state))) {
++		bool is_lse = ((instr & 0x3f200c00u) == 0x38200000u) ||   /* CAS*  */
++		    ((instr & 0x3f200c00u) == 0x38200800u) ||             /* LDADD/SWP */
++		    ((instr & 0xfffffc00u) == 0xdac00000u) ||             /* LDAPR (8.3) */
++		    ((instr & 0xffe0fc00u) == 0x3820fc00u);               /* STADD etc. */
++
++		if (is_lse) {
++			tulip_lse_traps++;
++			tulip_lse_last_instr = instr;
++			tulip_lse_hist[(instr >> 28) & 0xf]++;
++		} else {
++			tulip_undef_traps++;
++			tulip_undef_last_instr = instr;
++		}
++	}
++
+ #if CONFIG_DTRACE
+ 
+ 	if (PSR64_IS_USER64(get_saved_state_cpsr(state))) {
+@@ -1939,6 +1962,26 @@
+ 	return deadline;
+ }
+ #endif /* VINCE_TULIP */
++/*
++ * TULIP 0357: how often does userland trap into the kernel for an instruction
++ * the CPU cannot run?
++ *
++ * The iPhone X userland is built for ARMv8.2-A, which has the LSE atomics
++ * (CASA, CASAL, LDADD, SWP, LDAPR). Snapdragon 636 is ARMv8.0-A and has none
++ * of them, so every atomic in dyld, libsystem_platform, libsystem_pthread and
++ * QuartzCore has to be emulated by the kernel. A single emulated atomic costs
++ * roughly a thousand times what the instruction would, and a boot runs
++ * hundreds of millions of them.
++ *
++ * Count them and remember the last opcode, so HB19 can say whether this is the
++ * bottleneck worth attacking rather than one we assume is there.
++ */
++volatile uint64_t tulip_lse_traps;
++volatile uint32_t tulip_lse_last_instr;
++volatile uint32_t tulip_lse_hist[16];   /* top nibble of the opcode */
++volatile uint64_t tulip_undef_traps;    /* everything else */
++volatile uint32_t tulip_undef_last_instr;
++
+ volatile uint32_t tulip_irq_lastother;
+ 
+ void
