@@ -1,12 +1,16 @@
 diff -U3 -r a/iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp b/iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp
 --- a/iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp	2026-11-28 00:34:05.080271753 +0300
-+++ b/iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp	2026-11-28 00:34:05.128593014 +0300
-@@ -649,7 +649,7 @@
-                 IOLog("TULIP HID: enqueue type %d -> %s (events %llu, dropped %llu, port %u)\n",
++++ b/iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp	2026-11-28 00:58:46.285159352 +0300
+@@ -646,10 +646,10 @@
+             static unsigned enq_log;
+ 
+             if (enq_log < 20 || (enq_log % 64) == 0) {
+-                IOLog("TULIP HID: enqueue type %d -> %s (events %llu, dropped %llu, port %u)\n",
++                IOLog("TULIP HID: enqueue type %d -> %s (events %llu, dropped %llu, port %llu)\n",
                      (int)event->getType(), result ? "ok" : "FAILED",
                      (unsigned long long)_eventCount, (unsigned long long)_droppedEventCount,
 -                    (unsigned)_queuePort);
-+                    (uint32_t)_queuePort);
++                    (unsigned long long)_queuePort);
              }
              enq_log++;
          }
