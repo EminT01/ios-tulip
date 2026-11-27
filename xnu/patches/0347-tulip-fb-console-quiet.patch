@@ -1,0 +1,41 @@
+diff -U3 -r a/osfmk/console/video_console.c b/osfmk/console/video_console.c
+--- a/osfmk/console/video_console.c	2026-11-27 03:39:14.127045635 +0300
++++ b/osfmk/console/video_console.c	2026-11-27 03:43:55.688922039 +0300
+@@ -1230,6 +1230,37 @@
+ void
+ vcputc_options(char c, __unused bool poll)
+ {
++	/*
++	 * TULIP 0347: boot-arg sweetfb_quiet=1 keeps console text off the panel.
++	 *
++	 * This port pays for the console twice. sweet_console_muted stops the
++	 * serial path, but nothing tells the framebuffer console, so every line
++	 * still renders into the bootloader's uncached splash buffer - and each
++	 * line feed near the bottom runs gc_scroll_up(), which memmoves the whole
++	 * 1080x2280 frame (about 9 MB) through normal memory. A boot that prints
++	 * tens of thousands of lines spends most of its wall clock on those copies,
++	 * and the panel is unreadable anyway.
++	 *
++	 * With this on nothing is drawn: the log still reaches the serial path
++	 * (which sweet_console_muted mutes separately) and the persistent SYSTEM
++	 * ring when sweetlog=1 is given.
++	 */
++	{
++		static int quiet = -1;
++
++		if (quiet < 0) {
++			int on = 0;
++
++			quiet = (PE_parse_boot_argn("sweetfb_quiet", &on, sizeof(on)) && on) ? 1 : 0;
++			if (quiet) {
++				printf("[tulip] framebuffer console off (sweetfb_quiet=1); "
++				    "text goes to the serial path and the SYSTEM ring only\n");
++			}
++		}
++		if (quiet) {
++			return;
++		}
++	}
+ 	if (gc_initialized && gc_enabled) {
+ 		VCPUTC_LOCK_LOCK();
+ 		if (gc_enabled) {

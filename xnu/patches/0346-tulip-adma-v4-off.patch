@@ -1,0 +1,46 @@
+diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c	2026-11-27 03:35:40.597817531 +0300
++++ b/bsd/dev/tulip_sdhci.c	2026-11-27 03:37:42.933264459 +0300
+@@ -2117,6 +2117,34 @@
+ 	    bytes);
+ 	__asm__ volatile ("dsb sy" ::: "memory");
+ 
++	/*
++	 * TULIP 0346: SDMA reboots this phone, which only makes sense if the ABL
++	 * left SDHCI Version 4 mode on (HOST_CONTROL2 bit 12). In that mode 0x00
++	 * is the 32-bit block count and the DMA address comes from 0x58/0x5C, so
++	 * the address this driver wrote to 0x00 was read as a block count and the
++	 * engine fetched from whatever 0x58 held - an AXI error and a reset. With
++	 * bit 13 (64-bit addressing) also set, ADMA2 additionally expects 128-bit
++	 * descriptors, so the 32-bit table below would end in ADMAERR.
++	 *
++	 * Clear both bits for the duration of the transfer: legacy register
++	 * layout, 32-bit ADMA2 descriptors. The first read says what the
++	 * bootloader left behind.
++	 */
++	{
++		static int v4_logged;
++		uint16_t hc2v = hc_rd16(SDHCI_HOST_CONTROL2);
++
++		if (!v4_logged) {
++			v4_logged = 1;
++			printf("TULIP SDHCI: ADMA HC2 0x%04x (V4 %u A64 %u)\n", hc2v,
++			    (hc2v >> 12) & 1u, (hc2v >> 13) & 1u);
++		}
++		if (hc2v & ((1u << 12) | (1u << 13))) {
++			hc_wr16(SDHCI_HOST_CONTROL2,
++			    (uint16_t)(hc2v & ~((1u << 12) | (1u << 13))));
++		}
++	}
++
+ 	hc_wr(SDHCI_ADMA_SYS_ADDR, (uint32_t)tulip_adma_tbl_pa);
+ 	hc_wr(SDHCI_ADMA_SYS_ADDR_HI, (uint32_t)(tulip_adma_tbl_pa >> 32));
+ 	ctrl = hc_rd8(SDHCI_HOST_CONTROL);
+@@ -4997,7 +5025,6 @@
+ 
+ 		hc2 &= (uint16_t)~0x7u;             /* clear UHS mode select */
+ 		hc2 |= SDHCI_CTRL2_DDR50;
+-		hc2 &= (uint16_t)~(1u << 5);        /* 32-bit descriptor, not 64 */
+ 		hc_wr16(SDHCI_HOST_CONTROL2, hc2);
+ 		__asm__ volatile ("dsb sy" ::: "memory");
+ 		printf("TULIP SDHCI: DDR52: HOST_CONTROL2 0x%04x (UHS mode DDR50)\n",
