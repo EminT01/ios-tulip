@@ -1,0 +1,83 @@
+diff -U3 -r a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
+--- a/iokit/Kernel/arm/SweetCPU.cpp	2026-11-28 01:46:10.334861246 +0300
++++ b/iokit/Kernel/arm/SweetCPU.cpp	2026-11-28 01:51:27.246539856 +0300
+@@ -109,26 +109,31 @@
+ 	*(volatile uint32_t *)(rd + GICR_ISENABLER0) =
+ 	    (1U << vince_vtimer_intid) | (1U << VINCE_IPI_SGI);
+ 	/*
+-	 * TULIP 0356: keep the physical timer PPI enabled here, like every other
+-	 * core.
++	 * TULIP 0360: clear PPI 30 on the secondaries again. 0356 re-enabled it on
++	 * the theory that the earlier storm came from a bad CNTP deadline rather
++	 * than from the PPI itself, and the boot after it settled the argument:
+ 	 *
+-	 * 0321 cleared bit 30 on the secondaries because HB7 showed CPU1 taking 12
+-	 * million timer interrupts in 44 s. That reading was right but the cure
+-	 * was not: HB16 now shows the secondaries with enab 0x00480002 (no PPI 30)
+-	 * and pend 0x40200000 - INTID 30 pending, permanently, on every core. WFI
+-	 * wakes on a pending interrupt even when the GIC has it disabled, so the
+-	 * core enters the IRQ vector, ICC_IAR1_EL1 returns 1023 (spurious), nothing
+-	 * acknowledges it and the bit never clears. HB2 counts 30873 of those, HB7
+-	 * gives cpu4..cpu7 a few thousand timer interrupts where cpu1 has 80
+-	 * thousand, and the scheduler quanta fall apart - with the boot work all
+-	 * landing on the two cores that do get interrupts.
++	 *   HB8:  storm 1 cpu 1 intid 30 ... cval-ct 54307 cntp ctl 1
++	 *   HB7:  timer irqs per cpu 2521 / 433178041 / 244088686 / 233638345 /
++	 *                             282175 / 255498173 / 225874186 / 271945523
++	 *   HB2:  irq timer 1849546603
+ 	 *
+-	 * The storm 0321 was chasing came from 0320 arming CNTP with a fixed
+-	 * deadline computed from a counter that had already expired (HB8: cval-ct
+-	 * -77905). 0356 fixes that at the source in sleh.c by arming CNTP from
+-	 * XNU's own rtcPop, so the PPI can stay enabled.
++	 * 1.85 billion timer interrupts, all but a handful on the secondaries, with
++	 * the deadline 54307 ticks in the past even though 0356 arms CNTP from
++	 * cdp->rtcPop. rtcPop is stale on those cores as well, so arming from it
++	 * only moves the bad deadline; the PPI fires the moment the core enables
++	 * interrupts and the core never sleeps. HB14 shows it plainly: on cpu1..cpu3
++	 * and cpu5..cpu7 the IRQ count equals the entry count, while the boot CPU
++	 * sits at 29506 WFI for 29752 entries.
++	 *
++	 * The secondaries do not need the hardware tick. cpu_idle() polls 0286's
++	 * software tick, which is the configuration that ran this device without a
++	 * storm. The boot CPU keeps PPI 30, which is why cpu0 is the only healthy
++	 * one.
++	 *
++	 * This is 0321 coming back, with the reason 0356 removed it recorded.
+ 	 */
+-	__asm__ volatile ("" ::: "memory");
++	*(volatile uint32_t *)(rd + GICR_ICENABLER0) = (1U << 30);
+ 	__builtin_arm_dsb(DSB_SY);
+ 
+ 	/*
+diff -U3 -r a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+--- a/osfmk/arm64/sleh.c	2026-11-28 01:46:10.343374060 +0300
++++ b/osfmk/arm64/sleh.c	2026-11-28 01:53:33.140410275 +0300
+@@ -2118,9 +2118,26 @@
+ 			 * timer cannot storm.
+ 			 */
+ 			{
++				/*
++				 * TULIP 0360: leave the physical timer disarmed on the secondaries.
++				 *
++				 * 0356 armed CNTP from cdp->rtcPop here. HB8 of the build after
++				 * it reads "storm 1 cpu 1 intid 30 ... cval-ct 54307 cntp ctl
++				 * 1": the deadline is 54307 ticks in the past, so the moment
++				 * the core clears its interrupt mask the PPI fires, the handler
++				 * rearms it, and it fires again. HB7 counts 433 million timer
++				 * interrupts on cpu1 and HB2 1.85 billion overall.
++				 *
++				 * rtcPop is not a deadline this core can trust, so there is
++				 * nothing safe to arm from. The PPI is disabled on the
++				 * secondaries anyway (see vince_gicr_prepare), so arming it only
++				 * ever left a pending bit behind. Keep it off unless rtcPop is
++				 * genuinely ahead of the counter, which is the one case where
++				 * the wakeup is real.
++				 */
+ 				int64_t pop = (int64_t)cdp->rtcPop;
+ 
+-				if (pop > (int64_t)now) {
++				if (cpu_number() == 0 && pop > (int64_t)now) {
+ 					__builtin_arm_wsr64("CNTP_CVAL_EL0", (uint64_t)pop);
+ 					__builtin_arm_wsr64("CNTP_CTL_EL0", 1);
+ 				} else {
