@@ -1,0 +1,60 @@
+diff -U3 -r a/bsd/dev/tulip_sdhci.c b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c	2026-11-27 23:18:32.683252071 +0300
++++ b/bsd/dev/tulip_sdhci.c	2026-11-27 23:18:32.684560872 +0300
+@@ -5376,7 +5376,12 @@
+  * WFI loop (osfmk/arm64/cpu.c); the benchmark buffer is for HB11 below.
+  */
+ uint64_t tulip_idle_ticks[8], tulip_idle_wakes[8];
+-static uint64_t tulip_bench_buf[512 * 1024];    /* 4 MiB */
++/*
++ * TULIP 0358: 4 MiB of static BSS for the benchmark never printed a line on
++ * this image; 512 KiB still exceeds Kryo 260's L2 and is small enough to be
++ * mapped safely.
++ */
++static uint64_t tulip_bench_buf[64 * 1024];     /* 512 KiB */
+ static int tulip_bench_done;
+ 
+ static int
+@@ -5517,11 +5522,19 @@
+ 					printf("TULIP HB13: cntfrq %llu cntpct %llu ms(19.2M) mach %llu ms(19.2M)\n",
+ 					    fq, pct / 19200, mat / 19200);
+ 				}
+-				if (!tulip_bench_done) {
++				/*
++				 * TULIP 0354: run on every heartbeat, not only the first,
++				 * because the first one scrolls off the console in seconds.
++				 * The counter keeps climbing, so tulip_bench_done acts as a
++				 * "runs so far" tally rather than a one-shot flag.
++				 */
++				if (tulip_bench_done < 1000000) {
+ 					uint64_t t0, t1, t2, x = 1, sum = 0;
+ 					unsigned i, pass;
++					const unsigned elems =
++					    (unsigned)(sizeof(tulip_bench_buf) / sizeof(tulip_bench_buf[0]));
+ 
+-					tulip_bench_done = 1;
++					tulip_bench_done++;
+ 					/* TULIP 0353: cntpct_el0 is garbage here (HB13); mach time matches a stopwatch */
+ 					t0 = mach_absolute_time();
+ 					for (i = 0; i < 20000000; i++) {
+@@ -5530,14 +5543,17 @@
+ 					}
+ 					t1 = mach_absolute_time();
+ 					for (pass = 0; pass < 8; pass++) {
+-						for (i = 0; i < 512 * 1024; i++) {
++						for (i = 0; i < elems; i++) {
+ 							sum += tulip_bench_buf[i] + i;
+ 							tulip_bench_buf[i] = sum;
+ 						}
+ 					}
+ 					t2 = mach_absolute_time();
+-					printf("TULIP HB11: bench alu 20M steps %llu us (x %llu), mem 32 MiB rd+wr %llu us (sum %llu)\n",
+-					    (t1 - t0) * 1000 / 19200, x & 1, (t2 - t1) * 1000 / 19200, sum & 1);
++					printf("TULIP HB18: #%d bench alu 20M %llu us (x %llu) "
++					    "mem %u KiB x8 %llu us (sum %llu)\n",
++					    tulip_bench_done, (t1 - t0) * 1000 / 19200,
++					    x & 1, (elems * sizeof(tulip_bench_buf[0])) >> 10,
++					    (t2 - t1) * 1000 / 19200, sum & 1);
+ 				}
+ 			}
+ 			{
