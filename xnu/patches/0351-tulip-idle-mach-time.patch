@@ -1,0 +1,16 @@
+diff -U3 -r a/osfmk/arm64/cpu.c b/osfmk/arm64/cpu.c
+--- a/osfmk/arm64/cpu.c	2026-11-27 13:20:00.000000000 +0300
++++ b/osfmk/arm64/cpu.c	2026-11-27 13:21:00.000000000 +0300
+@@ -651,9 +651,10 @@
+ 			/*
+ 			 * TULIP 0322: time spent asleep in this WFI, per core, for HB11.
+ 			 */
+-			__asm__ volatile ("isb; mrs %0, cntpct_el0" : "=r"(tulip_idle_t0));
++			/* TULIP 0351: cntpct_el0 jumps on this SoC (HB13); mach time is the one that matches a stopwatch */
++			tulip_idle_t0 = mach_absolute_time();
+ 			__builtin_arm_wfi();
+ 			__builtin_arm_isb(ISB_SY);
+-			__asm__ volatile ("mrs %0, cntpct_el0" : "=r"(tulip_idle_t1));
++			tulip_idle_t1 = mach_absolute_time();
+ 			tulip_idle_ticks[cpu_data_ptr->cpu_number & 7] += tulip_idle_t1 - tulip_idle_t0;
+ 			tulip_idle_wakes[cpu_data_ptr->cpu_number & 7]++;
