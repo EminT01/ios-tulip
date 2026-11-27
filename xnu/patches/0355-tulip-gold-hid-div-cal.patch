@@ -1,0 +1,102 @@
+diff -U3 -r a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
+--- a/iokit/Kernel/arm/SweetCPU.cpp	2026-11-27 21:45:16.812496107 +0300
++++ b/iokit/Kernel/arm/SweetCPU.cpp	2026-11-27 21:45:16.812828896 +0300
+@@ -442,6 +442,8 @@
+ 
+ #define RCG_UPDATE           (1u << 0)
+ #define RCG_DIV_MASK         0x1fu
++/* TULIP 0355: HID_DIV 0 is not "/1" on APCS RCG2, it wedges the state machine */
++#define HID_DIV_ONE          0x01u
+ #define RCG_SRC_SEL_SHIFT    8u
+ #define RCG_SRC_SEL_MASK     (0x7u << RCG_SRC_SEL_SHIFT)
+ 
+@@ -498,7 +500,8 @@
+ {
+ 	static int done;
+ 	vm_offset_t pwr, perf, apm;
+-	uint32_t orig_perf_cfg, silver_src, user_ctl, safe_cfg, target_cfg, timeout;
++	uint32_t orig_perf_cfg, orig_l, new_l, silver_src, user_ctl, safe_cfg,
++	    target_cfg, timeout;
+ 
+ 	if (done) {
+ 		return;
+@@ -516,26 +519,46 @@
+ 	orig_perf_cfg = tulip_clk_rd32(perf, APCS_CFG_RCGR);
+ 	silver_src = tulip_clk_rd32(pwr, APCS_CFG_RCGR) & RCG_SRC_SEL_MASK;
+ 	user_ctl = tulip_clk_rd32(perf, APCS_PLL_USER_CTL);
+-	IOLog("TULIP CLK: gold boost: pll mode %#x L %#x user %#x cfg %#x\n",
+-	    tulip_clk_rd32(perf, APCS_PLL_MODE), tulip_clk_rd32(perf, APCS_PLL_L_VAL),
+-	    user_ctl, orig_perf_cfg);
++	IOLog("TULIP CLK: S1 cfg %#x L %#x user %#x mode %#x\n",
++	    orig_perf_cfg, tulip_clk_rd32(perf, APCS_PLL_L_VAL), user_ctl,
++	    tulip_clk_rd32(perf, APCS_PLL_MODE));
+ 
+ 	/*
+-	 * 1. Park the Gold RCG on GPLL0 (SRC_SEL 0) while cpu4..cpu7 are still
+-	 *    running, so the PLL can be stopped without stopping them.
++	 * 1. Park the Gold RCG on GPLL0 while cpu4..cpu7 are still running, so the
++	 *    PLL can be stopped without stopping them.
++	 *
++	 * TULIP 0355: keep HID_DIV at 0x01. HB12 reads the Gold RCG as cfg 0x401
++	 * (SRC_SEL 4, HID_DIV 1) and the first version of this code cleared both
++	 * fields, writing 0x000. On APCS RCG2 a divider of 0 is not "/1": the
++	 * state machine wedges and the cluster loses its clock, which is exactly
++	 * where the phone stopped - the log ended on "gold boost: pll mode 7 L 0x20
++	 * user 0xf cfg 0x401" and never printed HB6. Only SRC_SEL moves.
+ 	 */
+-	safe_cfg = orig_perf_cfg & ~(RCG_SRC_SEL_MASK | RCG_DIV_MASK);
++	safe_cfg = (orig_perf_cfg & ~RCG_SRC_SEL_MASK) | (HID_DIV_ONE & RCG_DIV_MASK);
+ 	if (tulip_rcg_switch(perf, safe_cfg) != 0) {
+ 		IOLog("TULIP CLK: gold boost: park to GPLL0 timed out, left alone\n");
+ 		return;
+ 	}
++	IOLog("TULIP CLK: gold boost: parked cfg %#x\n",
++	    tulip_clk_rd32(perf, APCS_CFG_RCGR));
+ 
+-	/* 2. Stop the PLL and relock it at L = 0x49. */
++	/*
++	 * 2. Stop the PLL and relock it at L = 0x49.
++	 *
++	 * TULIP 0355: L_VAL is not a 32-bit multiplier. The low 16 bits are L and
++	 * the high 16 are CAL_L_VAL, the VCO calibration the bootloader already
++	 * found for this part. Writing 0x49 to the whole word wiped that
++	 * calibration, so the PLL could not lock and the code fell through to the
++	 * timeout branch with the cluster stuck on GPLL0. Patch only the low half.
++	 */
++	orig_l = tulip_clk_rd32(perf, APCS_PLL_L_VAL);
++	new_l = (orig_l & ~0xffffu) | GOLD_TARGET_L;
+ 	tulip_clk_wr32(perf, APCS_PLL_USER_CTL, user_ctl & ~APCS_PLL_OUTCTRL);
+ 	tulip_clk_wr32(perf, APCS_PLL_MODE, 0x0u);
+ 	tulip_clk_udelay(5);
+-	tulip_clk_wr32(perf, APCS_PLL_L_VAL, GOLD_TARGET_L);
++	tulip_clk_wr32(perf, APCS_PLL_L_VAL, new_l);
+ 	tulip_clk_wr32(perf, APCS_PLL_ALPHA_VAL, 0x0u);
++	IOLog("TULIP CLK: gold boost: L_VAL %#x -> %#x\n", orig_l, new_l);
+ 	tulip_clk_wr32(perf, APCS_PLL_MODE, APCS_PLL_BYPASSNL);
+ 	tulip_clk_udelay(5);
+ 	tulip_clk_wr32(perf, APCS_PLL_MODE, APCS_PLL_BYPASSNL | APCS_PLL_RESET_N);
+@@ -544,8 +567,8 @@
+ 	while (!(tulip_clk_rd32(perf, APCS_PLL_MODE) & APCS_PLL_LOCK_DET)) {
+ 		if (--timeout == 0) {
+ 			/* Leave the cluster on GPLL0 at 600 MHz: safe, just not fast. */
+-			IOLog("TULIP CLK: gold boost: PLL lock timed out, cluster stays "
+-			    "on GPLL0 (600 MHz)\n");
++			IOLog("TULIP CLK: S2 lock timeout (mode %#x), cluster stays on GPLL0\n",
++			    tulip_clk_rd32(perf, APCS_PLL_MODE));
+ 			return;
+ 		}
+ 		tulip_clk_udelay(1);
+@@ -560,11 +583,11 @@
+ 	/* 4. Point the Gold RCG back at the cluster PLL, same source as Silver. */
+ 	target_cfg = (orig_perf_cfg & ~(RCG_SRC_SEL_MASK | RCG_DIV_MASK)) | silver_src;
+ 	if (tulip_rcg_switch(perf, target_cfg) != 0) {
+-		IOLog("TULIP CLK: gold boost: switch back to the PLL timed out\n");
++		IOLog("TULIP CLK: S3 restore timeout\n");
+ 		return;
+ 	}
+ 
+-	IOLog("TULIP CLK: gold boosted L=%#x (%u MHz) cfg %#x\n",
++	IOLog("TULIP CLK: OK L %#x (%u MHz) cfg %#x\n",
+ 	    tulip_clk_rd32(perf, APCS_PLL_L_VAL),
+ 	    (unsigned)(((tulip_clk_rd32(perf, APCS_PLL_L_VAL) & 0xffu) * 192u) / 10u), /* no FP in the kernel */
+ 	    tulip_clk_rd32(perf, APCS_CFG_RCGR));
