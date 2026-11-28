@@ -1,0 +1,39 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -4538,6 +4538,25 @@
+ 		uint64_t hb_ns = 0;
+ 
+ 		absolutetime_to_nanoseconds(mach_absolute_time(), &hb_ns);
++		{
++			extern void tulip_boost_gold_pll(void);
++			extern volatile uint32_t tulip_cpu_stage[8];
++			static int gold_early_done;
++
++			if (!gold_early_done) {
++				unsigned int ready = 0, c;
++				for (c = 0; c < 8; c++) {
++					if (tulip_cpu_stage[c] & 0x40) {
++						ready++;
++					}
++				}
++				if (ready >= 6) {
++					gold_early_done = 1;
++					printf("TULIP CLK: %u/8 cores ready, boosting gold\n", ready);
++					tulip_boost_gold_pll();
++				}
++			}
++		}
+ 		if (hb_ns >= hb_next_ns) {
+ 			hb_next_ns = hb_ns + 20000000000ULL;
+ 			printf("TULIP HB: up %llu s, sampler stage %d wakes %llu, eMMC reads %llu\n",
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -583,6 +583,8 @@
+ 	/* 4. Point the Gold RCG back at the cluster PLL, same source as Silver. */
+ 	target_cfg = (orig_perf_cfg & ~(RCG_SRC_SEL_MASK | RCG_DIV_MASK)) | silver_src;
+ 	if (tulip_rcg_switch(perf, target_cfg) != 0) {
++		/* Revert PLL output if RCG switch fails so cluster stays safely on GPLL0 */
++		tulip_clk_wr32(perf, APCS_PLL_USER_CTL, user_ctl & ~APCS_PLL_OUTCTRL);
+ 		IOLog("TULIP CLK: S3 restore timeout\n");
+ 		return;
+ 	}
