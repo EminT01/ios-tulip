@@ -1,0 +1,88 @@
+diff -U3 -r n362_a/bsd/dev/tulip_sdhci.c n362_b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c	2026-11-28 03:23:42.116144772 +0300
++++ b/bsd/dev/tulip_sdhci.c	2026-11-28 03:24:12.522129714 +0300
+@@ -5839,9 +5839,20 @@
+ 									ready++;
+ 								}
+ 							}
+-							if (ready == 8) {
++							/*
++							 * TULIP 0362: six of the eight stages is enough.
++							 *
++							 * HB5 reads "stage 1f 7f 7f 7f 7f 7f 7f 7f": the
++							 * boot CPU stays at 0x1f because it never goes
++							 * through processor_start(), so 0x40 is only ever
++							 * set on the seven secondaries. Waiting for
++							 * ready == 8 meant the boost never ran, which is
++							 * why no boot has printed "all 8 cores running".
++							 */
++							if (ready >= 6) {
+ 								gold_done = 1;
+-								printf("TULIP CLK: all 8 cores running, boosting gold\n");
++								printf("TULIP CLK: %u/8 cores running, boosting gold\n",
++								    ready);
+ 								tulip_boost_gold_pll();
+ 							}
+ 						}
+diff -U3 -r n362_a/bsd/vfs/vfs_subr.c n362_b/bsd/vfs/vfs_subr.c
+--- a/bsd/vfs/vfs_subr.c	2026-11-23 03:13:57.000000000 +0300
++++ b/bsd/vfs/vfs_subr.c	2026-11-28 03:24:12.520043398 +0300
+@@ -1267,6 +1267,16 @@
+ 			if (PE_parse_boot_argn("rootrw", &rootrw, sizeof(rootrw)) && rootrw) {
+ 				mp->mnt_flag &= ~MNT_RDONLY;
+ 			}
++			/*
++			 * TULIP 0362: do not write access times on the root.
++			 *
++			 * Boot reads dyld_shared_cache and a few hundred system
++			 * libraries, and every read that dirties a vnode pulls a
++			 * journaled atime write behind it. hfs_vfsops.c already
++			 * honours MNT_NOATIME, it was simply never set on the root
++			 * mount.
++			 */
++			mp->mnt_flag |= MNT_NOATIME;
+ 		}
+ #endif
+ 
+diff -U3 -r n362_a/iokit/Kernel/arm/SweetCPU.cpp n362_b/iokit/Kernel/arm/SweetCPU.cpp
+--- a/iokit/Kernel/arm/SweetCPU.cpp	2026-11-28 02:08:26.515174866 +0300
++++ b/iokit/Kernel/arm/SweetCPU.cpp	2026-11-28 03:26:45.769154412 +0300
+@@ -508,7 +508,7 @@
+ {
+ 	static int done;
+ 	vm_offset_t pwr, perf, apm;
+-	uint32_t orig_perf_cfg, orig_l, new_l, silver_src, user_ctl, safe_cfg,
++	uint32_t orig_perf_cfg, orig_l, new_l, user_ctl, safe_cfg,
+ 	    target_cfg, timeout;
+ 
+ 	if (done) {
+@@ -525,7 +525,6 @@
+ 	}
+ 
+ 	orig_perf_cfg = tulip_clk_rd32(perf, APCS_CFG_RCGR);
+-	silver_src = tulip_clk_rd32(pwr, APCS_CFG_RCGR) & RCG_SRC_SEL_MASK;
+ 	user_ctl = tulip_clk_rd32(perf, APCS_PLL_USER_CTL);
+ 	IOLog("TULIP CLK: S1 cfg %#x L %#x user %#x mode %#x\n",
+ 	    orig_perf_cfg, tulip_clk_rd32(perf, APCS_PLL_L_VAL), user_ctl,
+@@ -588,8 +587,19 @@
+ 	    APCS_PLL_BYPASSNL | APCS_PLL_RESET_N | APCS_PLL_OUTCTRL);
+ 	tulip_clk_wr32(apm, PERFCL_APM_CTL, tulip_clk_rd32(apm, PWRCL_APM_CTL));
+ 
+-	/* 4. Point the Gold RCG back at the cluster PLL, same source as Silver. */
+-	target_cfg = (orig_perf_cfg & ~(RCG_SRC_SEL_MASK | RCG_DIV_MASK)) | silver_src;
++	/*
++	 * TULIP 0362: point the Gold RCG back at its OWN cluster PLL.
++	 *
++	 * The old line wrote the Silver source here. HB12 reads silver as cfg 0x501
++	 * (SRC_SEL 5) and gold as cfg 0x401 (SRC_SEL 4), so that handed the Gold
++	 * cluster to the Silver PLL: the RCG ended up on 0x501 and the L = 0x49
++	 * just written to the Gold PLL was never selected. HB9 kept reporting
++	 * "gold mode 7 L 20" and TULIP MHZ kept saying 599 - the boost ran, then
++	 * the switch-back silently undid it on every boot.
++	 *
++	 * Restore exactly what the RCG was on before it was parked.
++	 */
++	target_cfg = orig_perf_cfg;
+ 	if (tulip_rcg_switch(perf, target_cfg) != 0) {
+ 		IOLog("TULIP CLK: S3 restore timeout\n");
+ 		return;
