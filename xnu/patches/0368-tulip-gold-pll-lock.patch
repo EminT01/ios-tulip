@@ -1,9 +1,9 @@
 --- a/iokit/Kernel/arm/SweetCPU.cpp
 +++ b/iokit/Kernel/arm/SweetCPU.cpp
-@@ -564,14 +564,12 @@
+@@ -564,13 +564,11 @@
  	tulip_clk_udelay(5);
  	tulip_clk_wr32(perf, APCS_PLL_MODE, APCS_PLL_BYPASSNL | APCS_PLL_RESET_N);
- 
+
 -	timeout = 500;
 +	/* TULIP 0368: bit 31 is not asserted on this PLL (Silver runs at mode 0x7); wait 200 us for VCO lock */
 +	timeout = 200;
