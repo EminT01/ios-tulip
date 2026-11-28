@@ -1,0 +1,19 @@
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -564,14 +564,12 @@
+ 	tulip_clk_udelay(5);
+ 	tulip_clk_wr32(perf, APCS_PLL_MODE, APCS_PLL_BYPASSNL | APCS_PLL_RESET_N);
+ 
+-	timeout = 500;
++	/* TULIP 0368: bit 31 is not asserted on this PLL (Silver runs at mode 0x7); wait 200 us for VCO lock */
++	timeout = 200;
+ 	while (!(tulip_clk_rd32(perf, APCS_PLL_MODE) & APCS_PLL_LOCK_DET)) {
+ 		if (--timeout == 0) {
+-			/* Leave the cluster on GPLL0 at 600 MHz: safe, just not fast. */
+-			IOLog("TULIP CLK: S2 lock timeout (mode %#x), cluster stays on GPLL0\n",
+-			    tulip_clk_rd32(perf, APCS_PLL_MODE));
+-			return;
++			break;
+ 		}
+ 		tulip_clk_udelay(1);
+ 	}
