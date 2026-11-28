@@ -1,0 +1,30 @@
+diff -U3 -r d370/a/iokit/Kernel/arm/SweetCPU.cpp d370/b/iokit/Kernel/arm/SweetCPU.cpp
+--- a/iokit/Kernel/arm/SweetCPU.cpp	2026-11-28 21:37:29.069226986 +0300
++++ b/iokit/Kernel/arm/SweetCPU.cpp	2026-11-28 21:38:46.932216839 +0300
+@@ -599,8 +599,24 @@
+ 	 */
+ 	target_cfg = orig_perf_cfg;
+ 	if (tulip_rcg_switch(perf, target_cfg) != 0) {
+-		/* Revert PLL output if RCG switch fails so cluster stays safely on GPLL0 */
+-		tulip_clk_wr32(perf, APCS_PLL_USER_CTL, user_ctl & ~APCS_PLL_OUTCTRL);
++		/*
++		 * TULIP 0370: park the RCG before gating the PLL, and gate it in the
++		 * register that owns the bit.
++		 *
++		 * 0369 copied the "user_ctl & ~APCS_PLL_OUTCTRL" pattern from 0350,
++		 * but APCS_PLL_OUTCTRL (1u << 0) is a field of APCS_PLL_MODE (0x6000),
++		 * not of APCS_PLL_USER_CTL (0x600c). Clearing bit 0 of USER_CTL did
++		 * nothing, so the guard never fired.
++		 *
++		 * Order matters more than the register: cpu4..cpu7 are still fetching
++		 * from this PLL, so it has to be off before the output is gated.
++		 * safe_cfg is the GPLL0 park this function already switched to at the
++		 * top, so pointing the RCG back there first leaves the cluster on a
++		 * clock that works no matter what happens to the PLL next.
++		 */
++		(void)tulip_rcg_switch(perf, safe_cfg);
++		tulip_clk_wr32(perf, APCS_PLL_MODE,
++		    tulip_clk_rd32(perf, APCS_PLL_MODE) & ~APCS_PLL_OUTCTRL);
+ 		IOLog("TULIP CLK: S3 restore timeout\n");
+ 		return;
+ 	}
