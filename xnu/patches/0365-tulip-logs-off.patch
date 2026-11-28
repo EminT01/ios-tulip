@@ -1,0 +1,8 @@
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -538,5 +538,3 @@
+ 	if (was != down) {
+-		IOLog("TULIP HID: touch %d %s at %d,%d%s (%u clients)\n", finger, down ? "down" : "up", x, y,
+-		    fEdge[finger] ? " edge" : "", _clients ? _clients->getCount() : 0);
+ 	}
+ 	dispatchEvent(collection);
