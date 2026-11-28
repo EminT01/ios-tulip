@@ -1,0 +1,18 @@
+--- a/iokit/Kernel/arm/hid/IOHIDEventServiceQueue.cpp
++++ b/iokit/Kernel/arm/hid/IOHIDEventServiceQueue.cpp
+@@ -179,6 +179,15 @@
+         }
+     }
+ 
++    if (!result) {
++        static int tulip_hq_n;
++        if (tulip_hq_n++ < 12) {
++            printf("TULIP HIDQ: FAIL evsz %u entry %u head %u tail %u qsize %u full %d\n",
++                (unsigned)eventSize, (unsigned)entrySize, (unsigned)head, (unsigned)tail,
++                (unsigned)getQueueSize(), (int)queueFull);
++        }
++    }
++
+     if (result) {
+         // Publish the data we just enqueued
+         __c11_atomic_store((_Atomic UInt32 *)&dataQueue->tail, newTail, __ATOMIC_RELEASE);
