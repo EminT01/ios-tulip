@@ -1,0 +1,41 @@
+diff -U3 -r n367a/bsd/dev/tulip_sdhci.c n367b/bsd/dev/tulip_sdhci.c
+--- a/bsd/dev/tulip_sdhci.c	2026-11-28 19:46:00.174599922 +0300
++++ b/bsd/dev/tulip_sdhci.c	2026-11-28 19:46:00.809447857 +0300
+@@ -382,7 +382,15 @@
+  * read path, which runs constantly during boot.
+  */
+ static int tt_ready;
+-static int tt_nvt_lines = 0x40000000;	/* TULIP 0366: no NVT console lines */
++/*
++ * TULIP 0367: an unsigned sentinel. 0366 seeded this with 0x40000000 so the
++ * "< 300" test never passes, but the counter is a signed int that each NVT
++ * poll increments: it walks up to INT_MAX and then wraps to a negative
++ * value, which is < 300, so the whole NVT log comes back after a wrap. Make
++ * the counter unsigned and seed it high enough that a boot cannot reach the
++ * limit.
++ */
++static unsigned int tt_nvt_lines = 0x40000000u;	/* TULIP 0367: no NVT console lines */
+ 
+ static int
+ tt_write(uint8_t addr, const uint8_t *d, int n)
+@@ -7056,7 +7064,19 @@
+ 		    "still written\n", herr);
+ 	}
+ 	for (;;) {
+-		(void)tsleep(&tulip_log_chan, PZERO, "tuliplog", hz);
++		/*
++		 * TULIP 0367: every five seconds instead of every one.
++		 *
++		 * This thread wakes once a second and pushes whatever accumulated
++		 * into the 4 MiB ring out to the SYSTEM partition. On a boot that
++		 * spends its time reading dyld_shared_cache each of those writes
++		 * competes with the reads for the same card, and logd_helper is
++		 * writing the same content through the BSD log path as well (it
++		 * burned 89.5 s of system time in one boot). A log that lands five
++		 * seconds late is still a complete log: the ring keeps every byte
++		 * and the flusher drains all of it on each wake.
++		 */
++		(void)tsleep(&tulip_log_chan, PZERO, "tuliplog", 5 * hz);
+ 
+ 		uint64_t total = os_atomic_load(&tulip_log_total, relaxed);
+ 		if (total == flushed) {
