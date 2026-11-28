@@ -1,0 +1,8 @@
+--- a/bsd/dev/tulip_sdhci.c
++++ b/bsd/dev/tulip_sdhci.c
+@@ -3000,4 +3000,4 @@
+ static int tt_ready;
+-static int tt_nvt_lines;
++static int tt_nvt_lines = 0x40000000;	/* TULIP 0366: no NVT console lines */
+ 
+ static int
